@@ -114,9 +114,9 @@ endif
  #LDFLAGS = -Bstatic -Map $(MAP) --strip-debug --fix-v4bx -lc
  #CLDFLAGS = -Wl,-Map,$(MAP) -Wl,-verbose
 # For emulation use this:
- CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000
 # Non emulation:
- #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
+ CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
 # Non emulation verbose:
 # CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-verbose
 
