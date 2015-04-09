@@ -37,6 +37,10 @@
 #include "crc16.h"
 #include "wav_player.h"
 
+#include "sine_wav_capture.h"
+
+#include <stdio.h>
+
 /*
 #define DEBUG_XMODEM
 */
@@ -56,6 +60,92 @@
 char* dbuf;
 #endif
 
+//4096
+char spybuff[4096];
+int spyidx = 0;
+int spybuffro = 0;
+
+void init_spybuff() {
+	int i;
+	for (i = 0 ; i < sizeof(spybuff) ; i++) {
+		spybuff[i] = 0;
+	}
+	spyidx = 0;
+	spybuffro = 0;
+}
+
+void dump_spybuff() {
+	int fullrows;
+	int lastrow;
+	int i,j;
+	int idx;
+	int columns = 8;
+	int buff_size;
+
+	if (spybuffro == 0) {
+	// File dump start:
+		//buff_size = sizeof(spybuff);
+		buff_size = spyidx;
+		fullrows = buff_size / columns;
+		lastrow = buff_size % columns;
+		printf("buff size %d\n", buff_size);
+		printf("full rows %d\n", fullrows);
+		printf("last rows %d\n", lastrow);
+		idx = 0;
+		for (i = 0 ; i < fullrows ; i++) {
+			for (j = 0 ; j < columns ; j++) {
+				printf("0x%02x,",spybuff[idx++]);
+			}
+			printf("\n");
+		}
+		for (i = 0 ; i < lastrow ; i++) {
+			printf("0x%02x%c",spybuff[idx++],(i==(lastrow-1))?'\n':',' );
+		}
+	// File dump end
+	} else {
+		printf("(spybuffro != 0) not supported : %d, idx %d\n",spybuffro,spyidx);
+	}
+
+
+}
+
+// Save version
+/*
+int xm_inbyte(unsigned int dly) {
+	int ret;
+	ret = _inbyte(dly);
+	spybuff[spyidx++] = (char)ret;
+	if (spyidx > sizeof(spybuff)) {
+		spyidx = 0;
+		spybuffro++;
+	}
+	return ret;
+}
+*/
+
+/*
+// regular version
+int xm_inbyte(unsigned int dly) {
+	return _inbyte(dly);
+	//return -1;
+}
+*/
+//100ac
+//106dc
+
+int pbidx = 0;
+// restore version
+volatile
+int xm_inbyte(unsigned int dly) {
+	int data;
+	if (pbidx >= sizeof(sine_wav_capture)/sizeof(sine_wav_capture[0])) while(1);
+	data = sine_wav_capture[pbidx++];
+	//data &= 0x00FF;
+	//printf("%02x\n",data);
+	//printf("%d\n",data);
+	return data;
+	//return SOH;
+}
 
 static int check(int crc, const unsigned char *buf, int sz)
 {
@@ -96,7 +186,7 @@ static void flushinput(void)
 }
 
 
-int xmodemReceive(unsigned char *dest, int destsz)
+int xmodemReceive(char **dest, int destsz)
 {
 	unsigned char xbuff[1030]; /* 1024 for XModem 1k + 3 head chars + 2 crc + nul */
 	unsigned char *p;
@@ -107,15 +197,23 @@ int xmodemReceive(unsigned char *dest, int destsz)
 	int retry, retrans = MAXRETRANS;
         unsigned int wait;
 
+	init_spybuff();
+	FILE *stream;
+	//char *bp;
+	size_t size;
+
         #ifdef DEBUG_XMODEM        
         dbuf = (char *) DEBUG_BUF;
         dbuf += sprintf(dbuf, "XR\n");
         #endif
         
+	// opening the memstream
+	//stream = open_memstream (&bp, &size);
+	stream = open_memstream (dest, &size);
 	for(;;) {
 		for( retry = 0; retry < 80; ++retry) {
 			if (trychar) _outbyte(trychar);
-			if ((c = _inbyte(DLY_1S)) >= 0) {		
+			if ((c = xm_inbyte(DLY_1S)) >= 0) {		
 				switch (c) {
 				case SOH:
 					bufsz = 128;
@@ -135,14 +233,21 @@ int xmodemReceive(unsigned char *dest, int destsz)
                                         #ifdef DEBUG_XMODEM
                                         dbuf += sprintf(dbuf, "EOT\n");
                                         #endif
+					//dump_spybuff();
+					fclose (stream);
+					printf("\nERROR in size %d != %d\n",
+						size,len);
+					//for (i = 0 ; i < len ; i++)
+					//	printf("%02x ",(*dest)[i]);
 					return len; /* normal end */
 				case CAN:
                                         #ifdef DEBUG_XMODEM
                                         dbuf += sprintf(dbuf, "CAN\n");
                                         #endif
-					if ((c = _inbyte(DLY_1S)) == CAN) {
+					if ((c = xm_inbyte(DLY_1S)) == CAN) {
 						flushinput();
 						_outbyte(ACK);
+						fclose (stream);
 						return -1; /* canceled by remote */
 					}
 					break;
@@ -156,6 +261,7 @@ int xmodemReceive(unsigned char *dest, int destsz)
 		_outbyte(CAN);
 		_outbyte(CAN);
 		_outbyte(CAN);
+		fclose (stream);
 		return -2; /* sync error */
 
 	start_recv:
@@ -167,7 +273,7 @@ int xmodemReceive(unsigned char *dest, int destsz)
 		p = xbuff;
 		*p++ = c;
 		for (i = 0;  i < (bufsz+(crc?1:0)+3); ++i) {
-			if ((c = _inbyte(DLY_1S)) < 0) goto reject;
+			if ((c = xm_inbyte(DLY_1S)) < 0) goto reject;
 			*p++ = c;
 		}
                 
@@ -179,7 +285,12 @@ int xmodemReceive(unsigned char *dest, int destsz)
 				register int count = destsz - len;
 				if (count > bufsz) count = bufsz;
 				if (count > 0) {
-					memcpy (&dest[len], &xbuff[3], count);
+					//memcpy (&dest[len], &xbuff[3], count);
+					for (i = 0;  i < (count); ++i) {
+						//dest[len+i] = xbuff[3+i];
+						fputc(xbuff[3+i],stream);
+						//fprintf(stream,"X");
+					}
 					len += count;
 				}
 				++packetno;
@@ -193,6 +304,7 @@ int xmodemReceive(unsigned char *dest, int destsz)
                                 #ifdef DEBUG_XMODEM
                                 dbuf += sprintf(dbuf, "mx e\n");                
                                 #endif
+				fclose (stream);
 				return -3; /* too many retry error */
 			}
 			_outbyte(ACK);

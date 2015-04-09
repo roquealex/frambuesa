@@ -248,17 +248,17 @@ void load_audio ( unsigned int address ){
 #else
 
 	printf("Loading Audio at address %0x\n", address);
-	file_size = xmodemReceive((char *) address, FILE_MAX_SIZE);   
-	//file_size = xmodemReceive(&wav_data, FILE_MAX_SIZE);   
+	//file_size = xmodemReceive((char *) address, FILE_MAX_SIZE);   
+	file_size = xmodemReceive(&wav_data, FILE_MAX_SIZE);   
 	if (file_size < 0 || file_size > FILE_MAX_SIZE) {
 		printf ("Xmodem error file size 0x%x \n", file_size);
-		//free(wav_data);
+		free(wav_data);
 		return;
 	}
 	printf ("\nFile loaded\n");
 
 	//printf("Address given to wav_data %x\n",wav_data);
-	wav_data = (char *) address;
+	//wav_data = (char *) address;
 #endif
 
 /*

@@ -153,11 +153,11 @@ AdrStack: .word  0x7000000
 //AdrUARTDR:      .word  0x16000000
 //AdrUARTFR:      .word  0x16000018
 @noemu:
-AdrUARTDR:      .word 0x20201000
-AdrUARTFR:      .word  0x20201018
+@AdrUARTDR:      .word 0x20201000
+@AdrUARTFR:      .word  0x20201018
 @emu:
-@AdrUARTDR:      .word 0x101f1000
-@AdrUARTFR:      .word  0x101f1018
+AdrUARTDR:      .word 0x101f1000
+AdrUARTFR:      .word  0x101f1018
 
 
         .section .bss
