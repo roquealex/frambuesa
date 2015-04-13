@@ -202,7 +202,7 @@ int xmodemReceive(char **dest, int destsz)
 	int retry, retrans = MAXRETRANS;
         unsigned int wait;
 
-	init_spybuff();
+	//init_spybuff();
 	FILE *stream;
 	//char *bp;
 	size_t size;
