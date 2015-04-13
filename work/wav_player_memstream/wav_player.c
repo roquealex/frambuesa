@@ -124,7 +124,7 @@ main ()
 	printf ("#  #  #  #######   #   #\n");
 	printf ("#  #  #  #     #    # #\n");
 	printf (" ## ##   #     #     #\n");
-	printf ("\nWAV Player (mem stream)\n\n");
+	printf ("\nWAV Player (mem stream v1.0)\n\n");
 
 	print_help();
 	printf("Ready\n> ");
@@ -247,6 +247,7 @@ void load_audio ( unsigned int address ){
 
 #else
 
+	wav_data = 0;
 	printf("Loading Audio at address %0x\n", address);
 	//file_size = xmodemReceive((char *) address, FILE_MAX_SIZE);   
 	file_size = xmodemReceive(&wav_data, FILE_MAX_SIZE);   

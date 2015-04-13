@@ -74,6 +74,7 @@ AMBER_CROSSTOOL ?= arm-none-eabi
  MEM    = $(addsuffix .mem, $(basename $(TGT)))
  DIS    = $(addsuffix .dis, $(basename $(TGT)))
  FLT    = $(addsuffix .flt, $(basename $(TGT)))
+ IMG    = $(addsuffix .img, $(basename $(TGT)))
  
 ifdef USE_MINI_LIBC
  OBJ = $(addsuffix .o,   $(basename $(SRC))) $(LIBC_OBJ)
@@ -102,11 +103,11 @@ endif
 
  MAP = $(addsuffix .map, $(basename $(TGT))) 
  
- ASFLAGS = -I../include 
+ ASFLAGS = -I../include -g 
   #CFLAGS = -c $(OPTIMIZE) -march=armv2a -mno-thumb-interwork -ffreestanding -I../include
   # if -nostartfiles is omited then an extra .init section is added with _init
   #AMBER:CFLAGS = -c $(OPTIMIZE) -march=armv2a -mno-thumb-interwork -nostartfiles
-  CFLAGS = -c $(OPTIMIZE) -mfpu=vfp -mfloat-abi=softfp -march=armv6zk -mtune=arm1176jzf-s -nostartfiles
+  CFLAGS = -c $(OPTIMIZE) -mfpu=vfp -mfloat-abi=softfp -march=armv6zk -mtune=arm1176jzf-s -nostartfiles -g
   #CFLAGS = -c $(OPTIMIZE) -march=armv2a -mno-thumb-interwork
  DSFLAGS = -C -S -EL
  #LDFLAGS = -Bstatic -Map $(MAP) --strip-debug --fix-v4bx 
@@ -114,8 +115,12 @@ endif
  #LDFLAGS = -Bstatic -Map $(MAP) --strip-debug --fix-v4bx -lc
  #CLDFLAGS = -Wl,-Map,$(MAP) -Wl,-verbose
 # For emulation use this:
- CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
+ CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,-Ttext-segment=10000 -g -Wl,-verbose
 # Non emulation:
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
+# Non emulation verbose:
 # CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-verbose
 
 ifdef USE_MINI_LIBC
@@ -123,6 +128,11 @@ debug:  mini-libc $(ELF) $(MMP32) $(MMP128) $(DIS)
 else
 debug:  $(MMP) $(DIS)
 endif
+
+run:  $(IMG)
+	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel $(IMG)
+rundebug:  $(IMG)
+	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -s -S -kernel random.img
 
 $(MMP32): $(MEM)
 	$(BMF32) $(MEM) $(MMP32)
@@ -153,6 +163,15 @@ $(ELF):
 $(DIS): $(TGT)
 	$(DS) $(DSFLAGS) $^ > $@
 
+$(IMG): $(TGT) random.img
+	$(OC) $(TGT) -O binary $(IMG)
+	dd if=$(IMG) of=random.img conv=notrunc
+
+random.img:
+	#dd if=/dev/urandom of=random.img bs=1024 count=1024
+	dd if=/dev/urandom of=random.img bs=1048576 count=255
+
+
 clean:
-	@rm -rfv *.o *.elf *.flt *.gdb *.dis *.map *.mem *.v $(MMP32) $(MMP128)
+	@rm -rfv *.o *.elf *.flt *.gdb *.dis *.map *.mem *.v $(IMG) $(MMP32) $(MMP128)
 

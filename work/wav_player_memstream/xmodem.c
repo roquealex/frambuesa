@@ -62,13 +62,14 @@ char* dbuf;
 #endif
 
 //4096
-char spybuff[4096];
+//int spybuff[4096];
+int spybuff[10240];
 int spyidx = 0;
 int spybuffro = 0;
 
 void init_spybuff() {
 	int i;
-	for (i = 0 ; i < sizeof(spybuff) ; i++) {
+	for (i = 0 ; i < sizeof(spybuff)/sizeof(spybuff[0]) ; i++) {
 		spybuff[i] = 0;
 	}
 	spyidx = 0;
@@ -124,18 +125,20 @@ int xm_inbyte(unsigned int dly) {
 }
 */
 
-/*
 // regular version
 int xm_inbyte(unsigned int dly) {
 	return _inbyte(dly);
 	//return -1;
 }
+/*
 */
 //100ac
 //106dc
 
-int pbidx = 0;
+
+/*
 // restore version
+int pbidx = 0;
 volatile
 int xm_inbyte(unsigned int dly) {
 	int data;
@@ -147,6 +150,7 @@ int xm_inbyte(unsigned int dly) {
 	return data;
 	//return SOH;
 }
+*/
 
 static int check(int crc, const unsigned char *buf, int sz)
 {
@@ -211,6 +215,14 @@ int xmodemReceive(char **dest, int destsz)
 	// opening the memstream
 	//stream = open_memstream (&bp, &size);
 	stream = open_memstream (dest, &size);
+	fseek( stream, 0, SEEK_SET ); //_lseek stub not used
+	// Exposing the bug (Index 3 should be zero):
+	//for (i = 0 ; i < 6; i++) {
+	//	printf("memstream_ptr[%d] = %08x\n",i,((unsigned int *)stream->_cookie)[i]);
+	//}
+/*
+*/
+
 	for(;;) {
 		for( retry = 0; retry < 80; ++retry) {
 			if (trychar) _outbyte(trychar);
@@ -235,9 +247,16 @@ int xmodemReceive(char **dest, int destsz)
                                         dbuf += sprintf(dbuf, "EOT\n");
                                         #endif
 					//dump_spybuff();
+					// When this close is called it looks
+					// like r0 doesnt have the correct
+					// value. file points to 0x109b8
+					// and r0 points to 27ec4. After calling
+					// mem open the 0x27ec4 is the address
+					// given to stream.
+					//
 					fclose (stream);
-					printf("\nERROR in size %d != %d\n",
-						size,len);
+					//printf("\nERROR in size %d != %d\n",
+					//	size,len);
 					//for (i = 0 ; i < len ; i++)
 					//	printf("%02x ",(*dest)[i]);
 					return len; /* normal end */
@@ -329,4 +348,75 @@ int xmodemReceive(char **dest, int destsz)
 	}
 }
 
+/*
+Debug notes, on a good case where the file is closed properly this is the content of stream:
+
+(gdb) print *(FILE *)0x27ec4
+$4 = {_p = 0x284d8 "", _r = 0, _w = 0, _flags = 10376, 
+  _file = -1, _bf = {
+    _base = 0x280d8 "0\276\067Â\310\001δӒ٘\337\277\345\377\353S\362\267\370\036\377\214\005\360\vH\022\220\030\275\036\315$\265*y0", _size = 1024}, _lbfsize = 0, 
+  _cookie = 0x28068, _read = 0x0, 
+  _write = 0x125e8 <memwriter>, 
+  _seek = 0x122e0 <memseeker>, 
+  _close = 0x12594 <memcloser>, _ub = {_base = 0x0, 
+    _size = 0}, _up = 0x0, _ur = 0, _ubuf = "\000\000", 
+  _nbuf = "", _lb = {_base = 0x0, _size = 0}, _blksize = 0, 
+  _offset = 0, _data = 0x0, _lock = 0, _mbstate = {
+    __count = 0, __value = {__wch = 0, 
+      __wchb = "\000\000\000"}}, _flags2 = 0}
+
+On the bad case this is the contents of the stream before closing:
+
+(gdb) print *(FILE *)0x27ec4
+$2 = {_p = 0x284d7 "\271cE\350\026)\v", _r = 0, _w = 1, 
+  _flags = 10440, _file = -1, _bf = {
+    _base = 0x280d8 "\276\067Â\310\001δӒ٘\337\277\345\377\353S\362\267\370\036\377\214\005\360\vH\022\220\030\275\036\315$\265*y0", _size = 1024}, _lbfsize = 0, 
+  _cookie = 0x28068, _read = 0x0, 
+  _write = 0x125e8 <memwriter>, 
+  _seek = 0x122e0 <memseeker>, 
+  _close = 0x12594 <memcloser>, _ub = {_base = 0x0, 
+    _size = 0}, _up = 0x0, _ur = 0, _ubuf = "\000\000", 
+  _nbuf = "", _lb = {_base = 0x0, _size = 0}, _blksize = 0, 
+  _offset = 0, _data = 0x0, _lock = 0, _mbstate = {
+    __count = 0, __value = {__wch = 0, 
+      __wchb = "\000\000\000"}}, _flags2 = 0}
+
+
+At the begining this is the good one :
+
+(gdb) print stream
+$2 = (FILE *) 0x27ec4
+(gdb) print *stream
+$3 = {_p = 0x0, _r = 0, _w = 0, _flags = 8200, _file = -1, 
+  _bf = {_base = 0x0, _size = 0}, _lbfsize = 0, 
+  _cookie = 0x28068, _read = 0x0, 
+  _write = 0x125e8 <memwriter>, 
+  _seek = 0x122e0 <memseeker>, 
+  _close = 0x12594 <memcloser>, _ub = {_base = 0x0, 
+    _size = 0}, _up = 0x0, _ur = 0, _ubuf = "\000\000", 
+  _nbuf = "", _lb = {_base = 0x0, _size = 0}, _blksize = 0, 
+  _offset = 0, _data = 0x0, _lock = 0, _mbstate = {
+    __count = 0, __value = {__wch = 0, 
+      __wchb = "\000\000\000"}}, _flags2 = 0}
+
+In the bad run:
+
+(gdb) print stream
+$2 = (FILE *) 0x27ec4
+(gdb) print *stream
+$3 = {_p = 0x0, _r = 0, _w = 0, _flags = 8200, _file = -1, 
+  _bf = {_base = 0x0, _size = 0}, _lbfsize = 0, 
+  _cookie = 0x28068, _read = 0x0, 
+  _write = 0x125e8 <memwriter>, 
+  _seek = 0x122e0 <memseeker>, 
+  _close = 0x12594 <memcloser>, _ub = {_base = 0x0, 
+    _size = 0}, _up = 0x0, _ur = 0, _ubuf = "\000\000", 
+  _nbuf = "", _lb = {_base = 0x0, _size = 0}, _blksize = 0, 
+  _offset = 0, _data = 0x0, _lock = 0, _mbstate = {
+    __count = 0, __value = {__wch = 0, 
+      __wchb = "\000\000\000"}}, _flags2 = 0}
+
+
+
+*/
 

@@ -103,7 +103,7 @@ endif
 
  MAP = $(addsuffix .map, $(basename $(TGT))) 
  
- ASFLAGS = -I../include 
+ ASFLAGS = -I../include -g 
   #CFLAGS = -c $(OPTIMIZE) -march=armv2a -mno-thumb-interwork -ffreestanding -I../include
   # if -nostartfiles is omited then an extra .init section is added with _init
   #AMBER:CFLAGS = -c $(OPTIMIZE) -march=armv2a -mno-thumb-interwork -nostartfiles
@@ -115,9 +115,10 @@ endif
  #LDFLAGS = -Bstatic -Map $(MAP) --strip-debug --fix-v4bx -lc
  #CLDFLAGS = -Wl,-Map,$(MAP) -Wl,-verbose
 # For emulation use this:
- CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
+ #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
 # Non emulation:
- #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
+ CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
 # Non emulation verbose:
 # CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-verbose
 
@@ -148,7 +149,7 @@ endif
 	#$(LD) $(LDFLAGS) -o $(TGT) $(TLDS) $(OBJ)
 	$(CC) -nostartfiles  $(CLDFLAGS) -o $(TGT) $(TLDS) $(OBJ)
 	#$(LD) $(LDFLAGS) -o $(TGT) $(TLDS) $(OBJ) -lc -lm -lgcc
-	$(OC) -R .comment -R .note $(TGT)
+	#$(OC) -R .comment -R .note $(TGT)
 
 $(OBJ): $(DEP)
 
@@ -166,8 +167,9 @@ $(IMG): $(TGT) random.img
 	dd if=$(IMG) of=random.img conv=notrunc
 
 random.img:
-	dd if=/dev/urandom of=random.img bs=1024 count=1024
+	#dd if=/dev/urandom of=random.img bs=1024 count=1024
+	dd if=/dev/urandom of=random.img bs=1048576 count=255
 
 clean:
-	@rm -rfv *.o *.elf *.flt *.gdb *.dis *.map *.mem *.v *.img $(MMP32) $(MMP128)
+	@rm -rfv *.o *.elf *.flt *.gdb *.dis *.map *.mem *.v $(IMG) $(MMP32) $(MMP128)
 
