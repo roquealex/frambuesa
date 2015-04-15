@@ -95,17 +95,20 @@ for (i = 0 ; i < 10000000 ; i++) {
 
   printf("Playing back the text\n");
 
-/*
   //The play back works even worse
   //pbstream = fmemopen(message, 13, "r");
   pbstream = fmemopen(bp, size, "r");
   //while ((ch = fgetc(pbstream)) != EOF) 
   //  printf("Got %c %x\n",ch,ch);
   while ((ch = fgetc(pbstream)) != EOF) {
-    //printf("%c",ch)
+    if (ch >= 'a' && ch <= 'z') {
+      ch += ('A' - 'a');
+    }
+    printf("%c",ch);
   }
   printf("\n");
   fclose(pbstream);
+/*
 */
 
 
