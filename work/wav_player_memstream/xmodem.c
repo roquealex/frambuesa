@@ -61,6 +61,8 @@
 char* dbuf;
 #endif
 
+//#define SPYBUFF
+#ifdef SPYBUFF
 //4096
 //int spybuff[4096];
 int spybuff[10240];
@@ -69,6 +71,7 @@ int spybuffro = 0;
 
 void init_spybuff() {
 	int i;
+	//printf("Expr %d\n", sizeof(spybuff)/sizeof(spybuff[0]) );
 	for (i = 0 ; i < sizeof(spybuff)/sizeof(spybuff[0]) ; i++) {
 		spybuff[i] = 0;
 	}
@@ -96,12 +99,20 @@ void dump_spybuff() {
 		idx = 0;
 		for (i = 0 ; i < fullrows ; i++) {
 			for (j = 0 ; j < columns ; j++) {
-				printf("0x%02x,",spybuff[idx++]);
+				if(spybuff[idx] < 0) {
+					printf("%d,",spybuff[idx++]);
+				} else {
+					printf("0x%02x,",spybuff[idx++]);
+				}
 			}
 			printf("\n");
 		}
 		for (i = 0 ; i < lastrow ; i++) {
-			printf("0x%02x%c",spybuff[idx++],(i==(lastrow-1))?'\n':',' );
+			if(spybuff[idx] < 0) {
+				printf("%d%c",spybuff[idx++],(i==(lastrow-1))?'\n':',' );
+			} else {
+				printf("0x%02x%c",spybuff[idx++],(i==(lastrow-1))?'\n':',' );
+			}
 		}
 	// File dump end
 	} else {
@@ -111,20 +122,24 @@ void dump_spybuff() {
 
 }
 
+#endif
+
+#ifdef SPYBUFF
 // Save version
-/*
 int xm_inbyte(unsigned int dly) {
 	int ret;
 	ret = _inbyte(dly);
-	spybuff[spyidx++] = (char)ret;
-	if (spyidx > sizeof(spybuff)) {
+	//ret = restore_inbyte(dly);
+	//spybuff[spyidx++] = (char)ret;
+	spybuff[spyidx++] = ret;
+	if (spyidx > sizeof(spybuff)/sizeof(spybuff[0]) ) {
 		spyidx = 0;
 		spybuffro++;
 	}
 	return ret;
 }
-*/
 
+#else
 // regular version
 int xm_inbyte(unsigned int dly) {
 	return _inbyte(dly);
@@ -151,6 +166,7 @@ int xm_inbyte(unsigned int dly) {
 	//return SOH;
 }
 */
+#endif
 
 static int check(int crc, const unsigned char *buf, int sz)
 {
@@ -187,7 +203,12 @@ static int check(int crc, const unsigned char *buf, int sz)
 
 static void flushinput(void)
 {
+	#ifdef SPYBUFF
+	// to record the last -1 in the capture
+	while (xm_inbyte(DLY_300MS) >= 0) ;
+	#else
 	while (_inbyte(DLY_300MS) >= 0) ;
+	#endif
 }
 
 
@@ -202,7 +223,10 @@ int xmodemReceive(char **dest, int destsz)
 	int retry, retrans = MAXRETRANS;
         unsigned int wait;
 
-	//init_spybuff();
+
+	#ifdef SPYBUFF
+	init_spybuff();
+	#endif
 	FILE *stream;
 	//char *bp;
 	size_t size;
@@ -246,7 +270,10 @@ int xmodemReceive(char **dest, int destsz)
                                         #ifdef DEBUG_XMODEM
                                         dbuf += sprintf(dbuf, "EOT\n");
                                         #endif
-					//dump_spybuff();
+
+					#ifdef SPYBUFF
+					dump_spybuff();
+					#endif
 					// When this close is called it looks
 					// like r0 doesnt have the correct
 					// value. file points to 0x109b8
