@@ -48,6 +48,8 @@
 #include "wav_player.h"
 #include "rpi-pwm.h"
 
+#include "rpi-dma.h"
+
 #include "rpi-gpio.h"
 #include "rpi-systimer.h"
 
@@ -58,13 +60,23 @@
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
 
+//#define AVOID_HW_WRITES
 
 /** GPIO Register set */
 volatile unsigned int* gpio = (unsigned int*)GPIO_BASE;
-volatile unsigned int* pwm = (unsigned int*)PWM_BASE;
 volatile unsigned int* clk = (unsigned int*)CLOCK_BASE;
 
-
+#ifndef AVOID_HW_WRITES
+volatile unsigned int* dma0 = (unsigned int*)DMA0_BASE;
+volatile unsigned int* dma1 = (unsigned int*)DMA1_BASE;
+volatile unsigned int *dma[2] = {(unsigned int*)DMA0_BASE, (unsigned int*)DMA1_BASE};
+volatile unsigned int* pwm = (unsigned int*)PWM_BASE;
+#else
+volatile unsigned int dma0[20];
+volatile unsigned int dma1[20];
+volatile unsigned int *dma[2] = {dma0,dma1};
+volatile unsigned int pwm[10];
+#endif
 
 /*
 void print_spaces ( int num );
@@ -89,6 +101,19 @@ void load_audio ( void );
 
 uint16_t *samples;
 unsigned int num_samples = 0;
+#define SAMPLE_BUFF_SIZE (1<<10)
+// 64K
+#define SAMPLE_BUFF_SIZE (1<<14)
+// 256K
+//#define SAMPLE_BUFF_SIZE (1<<16)
+//2^20/2^2:
+// 1 MB:
+//#define SAMPLE_BUFF_SIZE (1<<18)
+// 2 MB:
+//#define SAMPLE_BUFF_SIZE (1<<19)
+//#define SAMPLE_BUFF_SIZE (1<<5)
+uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
+
 
 extern unsigned int AdrStack;
 main () 
@@ -161,9 +186,16 @@ main ()
 
 void play_audio ( void ){
 	int i = 0;
+
+	// Memory to hold the control blocks for DMA
+	void *mem;
+	dma_cb_t *cb_ptr;
+	uint32_t align;
+
 	printf("Playing\n");
 	printf("Number of samples %d\n", num_samples);
 	//num_samples = 20;
+	/*
 	pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
 	if (num_samples > 0 ) {
 		for (i = 0 ; i < num_samples ; i ++) {
@@ -177,11 +209,145 @@ void play_audio ( void ){
 		}
 	}
 	pwm[PWM_CTL] = 0;
-	//audio_seq[AMBER_AUDIO_SEQ_CMD_OFF] = 0x01;
+	*/
+	if (num_samples > 0 ) {
+		unsigned int left_samples = num_samples;
+		int buffer_num = 0;
+
+		// Allocating space for 2 control blocks
+		align = sizeof(dma_cb_t);
+		printf("Alignment to be used %d\n",align);
+		mem = malloc(2*sizeof(dma_cb_t) + (align-1));
+		printf("Addr of mem = %x\n", (uintptr_t)mem);
+		cb_ptr = (dma_cb_t*)( ((uintptr_t)mem+(align-1)) & ~(uintptr_t)(align-1) );
+		printf("Addr of cb_ptr = %x\n", (uintptr_t)cb_ptr);
+
+		//pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
+		pwm[PWM_CTL] = PWM_CTL_USEF2 | PWM_CTL_PWEN2 |
+			PWM_CTL_CLRF1 | PWM_CTL_USEF1 | PWM_CTL_PWEN1 ;
+		printf("PWM_CTL = %08x\n", pwm[PWM_CTL]);
+		//pwm[PWM_DMAC] = PWMDMAC_ENAB | PWMDMAC_THRSHLD;
+		pwm[PWM_DMAC] = 0x80000707;
+
+		while (left_samples>0) {
+			int size_of_loop = (SAMPLE_BUFF_SIZE > left_samples) ? left_samples : SAMPLE_BUFF_SIZE;
+			int initial_idx = num_samples-left_samples ;
+			//for (i = 0 ; i < num_samples ; i ++) {}
+			// First create a buffer with enough samples:
+			for (i = 0 ; i < size_of_loop ; i ++) {
+				//uint16_t sample = samples[i] ^ 0x8000;
+				uint16_t sample = samples[initial_idx+i] ^ 0x8000;
+				sample>>=6;
+				sample_buffer[buffer_num][i] = (uint32_t) sample;
+			}
+			left_samples -= size_of_loop;
+			// Now play the buffer
+			//cb_ptr[0].ti = DMA_S_INC | DMA_D_INC ;
+			cb_ptr[buffer_num].ti = DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_S_INC | DMA_D_DREQ | (5<<16);
+			//DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_D_DREQ | DMA_PER_MAP(5);
+			//cb_ptr[0].ti = DMA_WAIT_RESP | DMA_S_INC | (5<<16);
+			cb_ptr[buffer_num].source_ad = (uint32_t) &sample_buffer[buffer_num][0] ;
+			cb_ptr[buffer_num].dest_ad = (((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000;
+			cb_ptr[buffer_num].txfr_len = size_of_loop*4; // size of the transffer is in bytes so x4
+			cb_ptr[buffer_num].stride = 0;
+			cb_ptr[buffer_num].nextconbk = 0;
+			printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
+			// This code will be substituted by dma:
+			dma[buffer_num][DMA_CS] = DMA_CS_RESET;
+#ifndef AVOID_HW_WRITES
+			//sleep(1);
+			RPI_WaitMicroSeconds(1000);
+			printf("Reset done\n");
+#endif
+
+			dma[buffer_num][DMA_DEBUG] = DMA_DEBUG_READ_ERROR | DMA_DEBUG_FIFO_ERROR | DMA_DEBUG_READ_LAST_NOT_SET_ERROR; 
+			//dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)cb_ptr | 0xC0000000;
+			dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)&cb_ptr[buffer_num] ;
+			// Starting the DMA engine:
+			printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			// Don't do this wait on the first loop
+			if (initial_idx != 0) {
+				// Wait for the other DMA channel to finish to activate this one
+				while(!(dma[buffer_num^1][DMA_CS] & DMA_CS_END));
+				// Technically we need to write only the END bit so we
+				// would need to apply an or mask but in reality we want
+				// to write everything in zero for this particular case
+				dma[buffer_num^1][DMA_CS] = DMA_CS_END;
+			}
+			// Play the next buffer
+			dma[buffer_num][DMA_CS] = DMA_CS_ACTIVE;
+			printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+
+#ifdef AVOID_HW_WRITES
+			// This code simulates the DMA transfer on emulator
+			if ( 
+				(dma[buffer_num][DMA_CS] & DMA_CS_ACTIVE) && 
+				(pwm[PWM_CTL] & PWM_CTL_PWEN1) &&
+				(pwm[PWM_CTL] & PWM_CTL_PWEN2) &&
+				(pwm[PWM_DMAC] & PWM_DMAC_ENAB)
+			) {
+				dma_cb_t *cb_ptr_test;
+				// Recover the pointer from DMA descriptor
+				cb_ptr_test = (dma_cb_t*)dma[buffer_num][DMA_CONBLK_AD];
+				for (i = 0 ; i < cb_ptr_test->txfr_len/4 ; i ++) {
+					const int graph_width = 33;
+					char graph[graph_width];
+					int j;
+					uint32_t sample = ((uint32_t*)cb_ptr_test->source_ad)[i];
+					sample>>=5;
+					for ( j = 0 ; j < (graph_width-1) ; j++) {
+						if (j == sample) {
+							graph[j] = '*';
+						} else {
+							graph[j] = ' ';
+						}
+					}
+					graph[(graph_width-1)] = 0;
+					//printf("%d\n", sample);
+					//printf("%d\n", graph_width);
+					if((i%2)==0) printf("%s", graph);
+					else printf("%s\n", graph);
+					
+				}
+				// Set the DMA done flag
+				dma[buffer_num][DMA_CS] = DMA_CS_END;
+			}
+#endif
+
+			//for (i = 0 ; i < 9 ; i++) {
+			//RPI_WaitMicroSeconds(1000000);
+			//printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			//}
+			
+			// Dont wait for it to finish anymore
+			//while(!(dma[buffer_num][DMA_CS] & DMA_CS_END));
+
+			//>printf("Finished DMA\n");
+			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+
+			// Technically we need to write only the END bit so we
+			// would need to apply an or mask but in reality we want
+			// to write everything in zero for this particular case
+			//dma[buffer_num][DMA_CS] = DMA_CS_END;
+			
+			//>printf("After clearing flag\n");
+			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			//while(1);
+
+			//printf("Src %x and dest %x from registers\n",dma[buffer_num][DMA_SOURCE_AD],dma[buffer_num][DMA_DEST_AD]);
+			// Toggle buffer number 0->1 or 1->0
+			buffer_num ^= 1;
+
+		}// while (left_samples>0) 
+		// Stop PWM:
+		printf("At the end Left samples %d\n", left_samples);
+		pwm[PWM_CTL] = 0;
+		free(mem);
+		printf("Done Playing\n");
+	} // if (num_samples > 0 ) 
 }
 void stop_audio ( void ){
 	printf("Stopping\n");
-	//audio_seq[AMBER_AUDIO_SEQ_CMD_OFF] = 0x02;
 }
 
 //#define FAST_TEST
@@ -358,10 +524,12 @@ void load_audio ( unsigned int address ){
 		
 	// Setting up the clock for pwm:
 
+#ifndef AVOID_HW_WRITES
        // stop clock and waiting for busy flag doesn't work, so kill clock
         *(clk + PWMCLK_CNTL) = 0x5A000000 | (1 << 5);
         //usleep(10);
         RPI_WaitMicroSeconds( 100 );
+#endif
 
         uint32_t pwm_clk_freq = 500000000;
         uint32_t bits_per_sample = 10;
@@ -378,6 +546,7 @@ void load_audio ( unsigned int address ){
                 printf("idiv out of range: %x\n", idiv);
 		while(1);
         }
+#ifndef AVOID_HW_WRITES
         *(clk + PWMCLK_DIV)  = 0x5A000000 | (idiv<<12);
 
         // source=osc and enable clock
@@ -396,9 +565,12 @@ void load_audio ( unsigned int address ){
     //pwm[PWM_RNG1] = 3200;
     //pwm[PWM_DAT1] = 1600;
 	//range = 8000;
+#endif
 	uint32_t range = 1<<bits_per_sample;
+#ifndef AVOID_HW_WRITES
     pwm[PWM_RNG1] = range;
     pwm[PWM_RNG2] = range;
+#endif
 
     printf ("Range %d \n",range);
 

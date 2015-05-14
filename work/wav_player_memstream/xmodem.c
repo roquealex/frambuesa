@@ -151,8 +151,8 @@ int xm_inbyte(unsigned int dly) {
 //106dc
 
 
-/*
 // restore version
+/*
 int pbidx = 0;
 volatile
 int xm_inbyte(unsigned int dly) {

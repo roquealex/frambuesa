@@ -67,9 +67,30 @@ uint32_t MODE1 : 1; /* Channel 1 Mode 0: PWM mode 1: Serialiser mode */
 uint32_t PWEN1 : 1; /* Channel 1 Enable */
 } rpi_pwm_ctl_t;
 
+#define PWM_CTL_MSEN2 (1<<15) /* Channel 2 M/S Enable */
+#define PWM_CTL_USEF2 (1<<13) /* Channel 2 Use Fifo */
+#define PWM_CTL_POLA2 (1<<12) /* Channel 2 Polarity */
+#define PWM_CTL_SBIT2 (1<<11) /* Channel 2 Silence Bit */
+#define PWM_CTL_RPTL2 (1<<10) /* Channel 2 Repeat Last Data */
+#define PWM_CTL_MODE2 (1<<9) /* Channel 2 Mode 0: PWM mode 1: Serialiser */
+#define PWM_CTL_PWEN2 (1<<8) /* Channel 2 Enable */
+#define PWM_CTL_MSEN1 (1<<7) /* Channel 1 M/S Enable */
+#define PWM_CTL_CLRF1 (1<<6) /* Clear Fifo 1: Clears FIFO 0: Has no effect */
+#define PWM_CTL_USEF1 (1<<5) /* Channel 1 Use Fifo */
+#define PWM_CTL_POLA1 (1<<4) /* Channel 1 Polarity */
+#define PWM_CTL_SBIT1 (1<<3) /* Channel 1 Silence Bit */
+#define PWM_CTL_RPTL1 (1<<2) /* Channel 1 Repeat Last Data */
+#define PWM_CTL_MODE1 (1<<1) /* Channel 1 Mode 0: PWM mode 1: Serialiser mode */
+#define PWM_CTL_PWEN1 (1<<0) /* Channel 1 Enable */
+
 typedef union {
 uint32_t val;
 rpi_pwm_ctl_t fields;
 } rpi_pwm_ctl_reg_t;
+
+
+#define PWM_DMAC_ENAB 31 /* DMA Enable */
+//15:8 PANIC DMA Threshold for PANIC signal RW 0x7
+//7:0 DREQ DMA Threshold for DREQ signal RW 0x7
 
 #endif

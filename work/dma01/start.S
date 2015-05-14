@@ -40,6 +40,18 @@
 // from http://www.opencores.org/lgpl.shtml                     //
 //                                                              //
 ----------------------------------------------------------------*/
+//#include "rpi-interrupts.h"
+.equ	CPSR_MODE_USER,	0x10
+.equ	CPSR_MODE_FIQ,	0x11
+.equ	CPSR_MODE_IRQ,	0x12
+.equ	CPSR_MODE_SVR,	0x13
+.equ	CPSR_MODE_ABT,	0x17
+.equ	CPSR_MODE_UND,	0x1b
+.equ	CPSR_MODE_SYS,	0x1f
+
+.equ	CPSR_IRQ_INHIBIT, 0x80
+.equ	CPSR_FIQ_INHIBIT, 0x40
+
 	//.section .text
 	//.section ".text.startup"
 	// funtion main seem to be the first thing if it is declared in the start. If we use init _start will be before main
@@ -48,6 +60,48 @@
 	//.section ".text.exit"
 	.globl	_start 
 _start:               
+	ldr	pc, _reset_h
+	ldr	pc, _undefined_instruction_vector_h
+	ldr	pc, _software_interrupt_vector_h
+	ldr	pc, _prefetch_abort_vector_h
+	ldr	pc, _data_abort_vector_h
+	ldr	pc, _unused_handler_h
+	ldr	pc, _interrupt_vector_h
+	ldr	pc, _fast_interrupt_vector_h
+ 
+_reset_h:                           .word   _reset_
+_undefined_instruction_vector_h:    .word   _trap_
+_software_interrupt_vector_h:       .word   _trap_
+_prefetch_abort_vector_h:           .word   _trap_
+_data_abort_vector_h:               .word   _trap_
+_unused_handler_h:                  .word   _trap_ @orig _reset_
+_interrupt_vector_h:                .word   _trap_
+_fast_interrupt_vector_h:           .word   _trap_
+_reset_:
+	@ So far only 64 bytes have been used so the PC should be
+	@ around that range
+	#mov	r0, pc
+	ldr	r0, =_start
+	mov	r1, #0
+	@ Moving the interrupt vectors to address 0
+	ldmia	r0!, {r2-r9} 
+	stmia	r1!, {r2-r9}
+	ldmia	r0!, {r2-r9} 
+	stmia	r1!, {r2-r9}
+	
+        @ initialize the stack pointer
+	mov	r0, #(CPSR_MODE_IRQ | CPSR_IRQ_INHIBIT | CPSR_FIQ_INHIBIT)
+	msr	cpsr_c, r0
+        ldr     sp, AdrStackIRQ
+	#sub	sp, sp, #4
+
+	mov	r0, #(CPSR_MODE_SVR | CPSR_IRQ_INHIBIT | CPSR_FIQ_INHIBIT)
+	msr	cpsr_c, r0
+        ldr     sp, AdrStack
+	#sub	sp, sp, #4
+
+#xp /200xw 0x06fffd60
+		
         /* Switch to User Mode */
         /* and unset interrupt mask bits */
         #mov     r0, #0x00000000
@@ -60,8 +114,9 @@ _start:
 	#mcr	15, 0, r0, cr2, cr0, 0   @ cache enable
         
         @ initialize the stack pointer
-        ldr     sp, AdrStack
-	sub	sp, sp, #4
+        @ldr     sp, AdrStack
+	@sub	sp, sp, #4
+
 
 	# Move _trap function to 0x07100000
 /*
@@ -145,10 +200,29 @@ _inbyte:
         #movs    pc, lr
         mov     pc, lr
 
+	.globl _enable_interrupts
+_enable_interrupts:
+	mrs     r0, cpsr
+	bic     r0, r0, #0x80
+	msr     cpsr_c, r0
+	mov     pc, lr
+
+
+	.globl _trap_
+_trap_:
+	ldr	r4, =trap_str
+1:	ldrb	r0, [r4], #1
+	cmp	r0, #0
+	beq	.
+	bl	_outbyte
+	b	1b
+	@ldr	r4, =RPI_INTERRUPT_CONTROLLER_BASE
 
 /* stack at top of ddr3 memory space */
 //AdrStack: .word  0x8000000
-AdrStack: .word  0x7000000
+//AdrStack: .word  0x7000000
+AdrStack:    .word 0x07000000
+AdrStackIRQ: .word 0x08000000
 // This was amber:
 //AdrUARTDR:      .word  0x16000000
 //AdrUARTFR:      .word  0x16000018
@@ -158,6 +232,9 @@ AdrUARTFR:      .word  0x20201018
 @emu:
 @AdrUARTDR:      .word 0x101f1000
 @AdrUARTFR:      .word  0x101f1018
+
+//trap_str:       .ascii "TRAP:\n\r\00"
+trap_str:       .asciz "TRAP:\n\r"
 
 
         .section .bss
