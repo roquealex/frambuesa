@@ -60,7 +60,7 @@
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
 
-//#define AVOID_HW_WRITES
+#define AVOID_HW_WRITES
 
 /** GPIO Register set */
 volatile unsigned int* gpio = (unsigned int*)GPIO_BASE;
@@ -100,10 +100,25 @@ void load_audio ( void );
 //20000000 
 
 uint16_t *samples;
-unsigned int num_samples = 0;
-#define SAMPLE_BUFF_SIZE (1<<10)
+//unsigned int num_samples = 0;
+
+// This structure will save the current wav information required for playback
+struct {
+	// Number of samples per channel
+	unsigned int num_samples;
+	// 1 if 2 channel , else 0
+	uint32_t is_stereo;
+	// Sample frequency for PWM 32k, 44.1k and 48k only
+	uint32_t fs;
+	// Interpolation ration
+	uint32_t inter;
+} audio_info;
+
+//#define SAMPLE_BUFF_SIZE (1<<9) // FAIL
+// Works:
+//#define SAMPLE_BUFF_SIZE (1<<10)
 // 64K
-#define SAMPLE_BUFF_SIZE (1<<14)
+//#define SAMPLE_BUFF_SIZE (1<<14)
 // 256K
 //#define SAMPLE_BUFF_SIZE (1<<16)
 //2^20/2^2:
@@ -111,7 +126,7 @@ unsigned int num_samples = 0;
 //#define SAMPLE_BUFF_SIZE (1<<18)
 // 2 MB:
 //#define SAMPLE_BUFF_SIZE (1<<19)
-//#define SAMPLE_BUFF_SIZE (1<<5)
+#define SAMPLE_BUFF_SIZE (1<<6)
 uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
 
 
@@ -193,7 +208,10 @@ void play_audio ( void ){
 	uint32_t align;
 
 	printf("Playing\n");
-	printf("Number of samples %d\n", num_samples);
+	//printf("Number of samples %d\n", num_samples);
+	printf("Number of samples: %d\n",audio_info.num_samples);
+	printf("Channels: %d\n",audio_info.is_stereo?2:1);
+	//while(1);
 	//num_samples = 20;
 	/*
 	pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
@@ -210,8 +228,9 @@ void play_audio ( void ){
 	}
 	pwm[PWM_CTL] = 0;
 	*/
-	if (num_samples > 0 ) {
-		unsigned int left_samples = num_samples;
+	if (audio_info.num_samples > 0 ) {
+		unsigned int samples_per_buffer;
+		unsigned int left_samples = audio_info.num_samples;
 		int buffer_num = 0;
 
 		// Allocating space for 2 control blocks
@@ -223,22 +242,55 @@ void play_audio ( void ){
 		printf("Addr of cb_ptr = %x\n", (uintptr_t)cb_ptr);
 
 		//pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
+		// This is for stereo:
 		pwm[PWM_CTL] = PWM_CTL_USEF2 | PWM_CTL_PWEN2 |
 			PWM_CTL_CLRF1 | PWM_CTL_USEF1 | PWM_CTL_PWEN1 ;
 		printf("PWM_CTL = %08x\n", pwm[PWM_CTL]);
 		//pwm[PWM_DMAC] = PWMDMAC_ENAB | PWMDMAC_THRSHLD;
 		pwm[PWM_DMAC] = 0x80000707;
 
+		// To start with the number of samples that a buffer can fit is half of the size since
+		// the buffer interleaves a left and a right sample.
+		samples_per_buffer = (SAMPLE_BUFF_SIZE/2);
+
+		// This is temporary until we get the buffers for FIR
+			uint16_t last_sample_a;
+			uint16_t last_sample_b;
 		while (left_samples>0) {
-			int size_of_loop = (SAMPLE_BUFF_SIZE > left_samples) ? left_samples : SAMPLE_BUFF_SIZE;
-			int initial_idx = num_samples-left_samples ;
+			// this line was for the old stereo/mono scheme
+			//int size_of_loop = (SAMPLE_BUFF_SIZE/2 > left_samples) ? left_samples : SAMPLE_BUFF_SIZE/2;
+			int size_of_loop = (samples_per_buffer > left_samples) ? left_samples : samples_per_buffer ;
+			int initial_idx = audio_info.num_samples-left_samples ;
 			//for (i = 0 ; i < num_samples ; i ++) {}
 			// First create a buffer with enough samples:
+			/*
 			for (i = 0 ; i < size_of_loop ; i ++) {
-				//uint16_t sample = samples[i] ^ 0x8000;
 				uint16_t sample = samples[initial_idx+i] ^ 0x8000;
 				sample>>=6;
 				sample_buffer[buffer_num][i] = (uint32_t) sample;
+			}
+			*/
+			for (i = 0 ; i < size_of_loop ; i ++) {
+				//int idx = (audio_info.is_stereo)?i*2:i;
+				int idx = (initial_idx+i);
+				if(audio_info.is_stereo) idx *= 2;
+				//uint16_t sample = samples[initial_idx+idx] ^ 0x8000;
+				uint16_t sample_a = samples[idx];
+				uint16_t sample_b = (audio_info.is_stereo)?samples[idx+1]:sample_a;
+				// Do the interpolation here:
+
+				last_sample_a = sample_a;
+				last_sample_b = sample_b;
+				// Removing the symbol by adding offset
+				sample_a ^= 0x8000;
+				sample_b ^= 0x8000;
+				// Reducing the bit size to match the range of the PWM
+				sample_a>>=6;
+				sample_b>>=6;
+				sample_buffer[buffer_num][i*2] = (uint32_t) sample_a;
+				sample_buffer[buffer_num][(i*2)+1] = (uint32_t) sample_b;
+				//i++;
+				//sample_buffer[buffer_num][i] = (uint32_t) sample;
 			}
 			left_samples -= size_of_loop;
 			// Now play the buffer
@@ -248,7 +300,11 @@ void play_audio ( void ){
 			//cb_ptr[0].ti = DMA_WAIT_RESP | DMA_S_INC | (5<<16);
 			cb_ptr[buffer_num].source_ad = (uint32_t) &sample_buffer[buffer_num][0] ;
 			cb_ptr[buffer_num].dest_ad = (((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000;
-			cb_ptr[buffer_num].txfr_len = size_of_loop*4; // size of the transffer is in bytes so x4
+			// This is for the old mono/stereo scheme
+			//cb_ptr[buffer_num].txfr_len = size_of_loop*4*2; // size of the transffer is in bytes so x4
+			// Size of loops is in number of samples, mutiplying it for two for left and right
+			// and 4 because on the DMA buffer uses 32 bit samples (This is what PWM receives)
+			cb_ptr[buffer_num].txfr_len = size_of_loop*4*2; // size of the transffer is in bytes so x4
 			cb_ptr[buffer_num].stride = 0;
 			cb_ptr[buffer_num].nextconbk = 0;
 			printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
@@ -336,9 +392,17 @@ void play_audio ( void ){
 
 			//printf("Src %x and dest %x from registers\n",dma[buffer_num][DMA_SOURCE_AD],dma[buffer_num][DMA_DEST_AD]);
 			// Toggle buffer number 0->1 or 1->0
-			buffer_num ^= 1;
+			if (left_samples>0) buffer_num ^= 1;
 
 		}// while (left_samples>0) 
+
+		// Wait for the last DMA transffer to finish before stopping the PWM
+		while(!(dma[buffer_num][DMA_CS] & DMA_CS_END));
+		// Technically we need to write only the END bit so we
+		// would need to apply an or mask but in reality we want
+		// to write everything in zero for this particular case
+		dma[buffer_num^1][DMA_CS] = DMA_CS_END;
+
 		// Stop PWM:
 		printf("At the end Left samples %d\n", left_samples);
 		pwm[PWM_CTL] = 0;
@@ -365,7 +429,7 @@ void load_audio ( unsigned int address ){
 	struct riff_header *riff_header_ptr;
 	struct fmt *fmt_ptr;
 	struct data *data_ptr;
-	//unsigned int num_samples;
+	unsigned int num_samples;
 	void *sample_start;
 	void *wav_start;
 	unsigned int offset;
@@ -489,16 +553,33 @@ void load_audio ( unsigned int address ){
 	//num_samples = data_ptr->Subchunk2Size / (fmt_ptr->NumChannels * ( fmt_ptr->BitsPerSample/8) );
 	num_samples = data_ptr->Subchunk2Size;// / (fmt_ptr->NumChannels * ( fmt_ptr->BitsPerSample/8) );
 
-	// The following division is not required since
-	// the algorithm works on the total number of samples
-	// regardless of if they are left or right
-	//if (fmt_ptr->NumChannels == 2) {
-	//	num_samples >>= 1;
-	//}
+	// To unify the case of stereo and mono plus different interpolations it is better
+	// to use the sample size as the size of left or right channel
+	if (fmt_ptr->NumChannels == 2) {
+		if(num_samples&0x01) {
+			printf("ERROR: Wrong wav format, size of subchunk is %d and 2 "
+				"channels but size is not multiple of 2\n", data_ptr->Subchunk2Size);
+			while(1);
+		}
+		num_samples >>= 1;
+		audio_info.is_stereo = 1;
+	} else if (fmt_ptr->NumChannels == 1) {
+		audio_info.is_stereo = 0;
+	} else {
+		printf("ERROR: Unsupported number of channels %d, only stereo "
+			"and mono is supported\n", fmt_ptr->NumChannels);
+		while(1);
+	}
 	switch ( fmt_ptr->BitsPerSample) {
 		case 8:
 			break;
 		case 16:
+			if(num_samples&0x01) {
+				printf("ERROR: Wrong wav format, size of subchunk is %d and 16 "
+					"bits per sample, but size not multiple or 2 or 4\n",
+					data_ptr->Subchunk2Size);
+				while(1);
+			}
 			num_samples >>= 1;
 			break;
 		case 32:
@@ -509,7 +590,8 @@ void load_audio ( unsigned int address ){
 			return ;
 			break;
 	}
-	printf("Number of samples: %d\n",num_samples);
+	audio_info.num_samples = num_samples;
+	printf("Number of samples: %d\n",audio_info.num_samples);
 	wav_start = (void *)&wav_data[0];
 	offset = 20 + fmt_ptr->Subchunk1Size + 8;
 	//sample_start = (void *)&wav_data[20 + fmt_ptr->Subchunk1Size + 8];
@@ -533,7 +615,11 @@ void load_audio ( unsigned int address ){
 
         uint32_t pwm_clk_freq = 500000000;
         uint32_t bits_per_sample = 10;
-        uint32_t sampling_rate = 44100;
+        //uint32_t bits_per_sample = 14;
+        uint32_t sampling_rate = fmt_ptr->SampleRate;
+	audio_info.inter = 2;
+        //uint32_t sampling_rate = 44100;
+        //uint32_t sampling_rate = 48000;
         //int idiv = (pwm_clk_freq/0x3FF)/sampling_rate;
         //int idiv = (pwm_clk_freq/(1<<10))/sampling_rate;
         int idiv = (pwm_clk_freq>>bits_per_sample)/sampling_rate;
