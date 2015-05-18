@@ -60,7 +60,7 @@
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
 
-//#define AVOID_HW_WRITES
+#define AVOID_HW_WRITES
 
 /** GPIO Register set */
 volatile unsigned int* gpio = (unsigned int*)GPIO_BASE;
@@ -99,20 +99,31 @@ void load_audio ( void );
 //unsigned long audio_seq[8];
 //20000000 
 
-int16_t *samples;
-//unsigned int num_samples = 0;
 
 // This structure will save the current wav information required for playback
 struct {
 	// Number of samples per channel
 	unsigned int num_samples;
+
 	// Sample frequency for PWM 32k, 44.1k and 48k only
+	// the original wav sample freq is fs / 2^inter
 	uint32_t fs;
-	// Interpolation ration
+
+	// Interpolation ration. The value in this variable is the
+	// exponent of 2 that the interpolation is going to be based:
+	//
+	// inter 2^inter Ratio
+	//   0   2^0 = 1  1:1
+	//   1   2^1 = 2  2:1
+	//   2   2^2 = 4  4:1
 	uint32_t inter;
 
 	// Pointer to the file in memory
 	char *wav_data;
+
+	// Direct pointer to the samples in memory,
+	// only 16 bit samples supported
+	int16_t *samples;
 
 	// 1 if 2 channel , else 0
 	uint32_t is_stereo;
@@ -292,8 +303,8 @@ void play_audio ( void ){
 				//uint16_t sample = samples[initial_idx+idx] ^ 0x8000;
 				// Array of left and right current samples
 				int16_t sample[2];
-				sample[0] = samples[idx];
-				sample[1] = (audio_info.is_stereo)?samples[idx+1]:sample[0];
+				sample[0] = audio_info.samples[idx];
+				sample[1] = (audio_info.is_stereo)?audio_info.samples[idx+1]:sample[0];
 				//sample[0] = ((i&3)==0)?0x7fff:((i&3)==2)?0x8000:0;
 				//sample[1] = (i&1)?0x7fff:0x8000;
 				//sample[0] = 0x7fff;
@@ -725,7 +736,7 @@ void load_audio (){
 
     printf ("Range %d \n",range);
 
-	samples = (uint16_t *) sample_start;
+	audio_info.samples = (uint16_t *) sample_start;
 	audio_info.is_valid = 1;
 
 }
