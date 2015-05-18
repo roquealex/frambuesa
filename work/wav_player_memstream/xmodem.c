@@ -38,7 +38,13 @@
 #include "crc16.h"
 #include "wav_player.h"
 
-#include "sine_wav_capture.h"
+//#include "sine_wav_capture.h"
+
+//#include "sin_16k_mono.h"
+#include "sin_16k_stereo.h"
+//#include "sin_44k_mono.h"
+//#include "sin_44k_stereo.h"
+
 
 #include <stdio.h>
 

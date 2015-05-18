@@ -50,12 +50,15 @@
 //#define FILE_MAX_SIZE   0x00800000 /* 8MB max Xmodem transfer file size        */
 #define FILE_MAX_SIZE   0x01000000 /* 16MB max Xmodem transfer file size        */
 
+#include <stdint.h>
 
 void print_spaces ( int num );
 void print_help ( void );
 void play_audio ( void );
 void stop_audio ( void );
 void load_audio ( unsigned int );
+
+int16_t midpoint16(int16_t, int16_t);
 
 
 /*
