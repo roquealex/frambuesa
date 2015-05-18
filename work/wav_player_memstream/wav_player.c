@@ -60,7 +60,7 @@
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
 
-#define AVOID_HW_WRITES
+//#define AVOID_HW_WRITES
 
 /** GPIO Register set */
 volatile unsigned int* gpio = (unsigned int*)GPIO_BASE;
@@ -109,13 +109,7 @@ struct {
 	// the original wav sample freq is fs / 2^inter
 	uint32_t fs;
 
-	// Interpolation ration. The value in this variable is the
-	// exponent of 2 that the interpolation is going to be based:
-	//
-	// inter 2^inter Ratio
-	//   0   2^0 = 1  1:1
-	//   1   2^1 = 2  2:1
-	//   2   2^2 = 4  4:1
+	// Interpolation ration.
 	uint32_t inter;
 
 	// Pointer to the file in memory
@@ -230,26 +224,8 @@ void play_audio ( void ){
 		printf("No audio is loaded in memory, load some audio first\n");
 		return;
 	}
-	//printf("Number of samples %d\n", num_samples);
 	printf("Number of samples: %d\n",audio_info.num_samples);
 	printf("Channels: %d\n",audio_info.is_stereo?2:1);
-	//while(1);
-	//num_samples = 20;
-	/*
-	pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
-	if (num_samples > 0 ) {
-		for (i = 0 ; i < num_samples ; i ++) {
-			uint16_t sample = samples[i] ^ 0x8000;
-			while((pwm[PWM_STA] & 0x01) == 1);
-			//pwm[PWM_FIF1] = samples[i]>>6;
-			//pwm[PWM_FIF1] = sample>>6;
-			sample>>=6;
-			pwm[PWM_FIF1] = sample;
-			//printf("sample %d = %x addr %0x\n",i,sample, &samples[i]);
-		}
-	}
-	pwm[PWM_CTL] = 0;
-	*/
 	if (audio_info.num_samples > 0 ) {
 		unsigned int samples_per_buffer;
 		unsigned int left_samples = audio_info.num_samples;
@@ -271,28 +247,23 @@ void play_audio ( void ){
 		//pwm[PWM_DMAC] = PWMDMAC_ENAB | PWMDMAC_THRSHLD;
 		pwm[PWM_DMAC] = 0x80000707;
 
-	//audio_info.inter = 4;
-		// To start with the number of samples that a buffer can fit is half of the size since
-		// the buffer interleaves a left and a right sample.
+		dma[0][DMA_CS] = DMA_CS_RESET;
+		dma[1][DMA_CS] = DMA_CS_RESET;
+#ifndef AVOID_HW_WRITES
+		RPI_WaitMicroSeconds(1000);
+		printf("Reset done\n");
+#endif
+		// To start with the number of samples that a buffer can fit is
+		// half of the size since the buffer interleaves a left and a
+		// right sample.
 		samples_per_buffer = (SAMPLE_BUFF_SIZE/2);
 		samples_per_buffer /= audio_info.inter;
 
 		// This is temporary until we get the buffers for FIR
 			int16_t last_sample[2] = {0,0};
 		while (left_samples>0) {
-			// this line was for the old stereo/mono scheme
-			//int size_of_loop = (SAMPLE_BUFF_SIZE/2 > left_samples) ? left_samples : SAMPLE_BUFF_SIZE/2;
 			int size_of_loop = (samples_per_buffer > left_samples) ? left_samples : samples_per_buffer ;
 			int initial_idx = audio_info.num_samples-left_samples ;
-			//for (i = 0 ; i < num_samples ; i ++) {}
-			// First create a buffer with enough samples:
-			/*
-			for (i = 0 ; i < size_of_loop ; i ++) {
-				uint16_t sample = samples[initial_idx+i] ^ 0x8000;
-				sample>>=6;
-				sample_buffer[buffer_num][i] = (uint32_t) sample;
-			}
-			*/
 			for (i = 0 ; i < size_of_loop ; i ++) {
 				// Maximun interpolation supported is 4
 				//uint32_t interarr[4];
@@ -393,13 +364,14 @@ void play_audio ( void ){
 			cb_ptr[buffer_num].stride = 0;
 			cb_ptr[buffer_num].nextconbk = 0;
 			printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
+			/*
 			// This code will be substituted by dma:
 			dma[buffer_num][DMA_CS] = DMA_CS_RESET;
 #ifndef AVOID_HW_WRITES
-			//sleep(1);
 			RPI_WaitMicroSeconds(1000);
 			printf("Reset done\n");
 #endif
+			*/
 
 			dma[buffer_num][DMA_DEBUG] = DMA_DEBUG_READ_ERROR | DMA_DEBUG_FIFO_ERROR | DMA_DEBUG_READ_LAST_NOT_SET_ERROR; 
 			//dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)cb_ptr | 0xC0000000;
@@ -407,6 +379,7 @@ void play_audio ( void ){
 			// Starting the DMA engine:
 			printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
 			// Don't do this wait on the first loop
+			// otherwise wait for the other DMA to finish
 			if (initial_idx != 0) {
 				// Wait for the other DMA channel to finish to activate this one
 				while(!(dma[buffer_num^1][DMA_CS] & DMA_CS_END));
