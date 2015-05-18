@@ -129,7 +129,8 @@ debug:  $(MMP) $(DIS)
 endif
 
 run:  $(IMG)
-	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel $(IMG)
+	#qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel $(IMG)
+	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel random.img
 rundebug:  $(IMG)
 	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -s -S -kernel random.img
 

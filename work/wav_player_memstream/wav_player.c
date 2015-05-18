@@ -106,12 +106,20 @@ int16_t *samples;
 struct {
 	// Number of samples per channel
 	unsigned int num_samples;
-	// 1 if 2 channel , else 0
-	uint32_t is_stereo;
 	// Sample frequency for PWM 32k, 44.1k and 48k only
 	uint32_t fs;
 	// Interpolation ration
 	uint32_t inter;
+
+	// Pointer to the file in memory
+	char *wav_data;
+
+	// 1 if 2 channel , else 0
+	uint32_t is_stereo;
+	// Equalizer is enabled
+	uint32_t is_valid;
+	// Equalizer is enabled
+	uint32_t eq_en;
 } audio_info;
 
 //#define SAMPLE_BUFF_SIZE (1<<9) // FAIL
@@ -154,6 +162,7 @@ main ()
 	gpio[gpio_fsel_reg] = gpio_fsel_regval;
 
 
+	audio_info.is_valid = 0;
 
     //printf ("Hello, World!\n");
 	printf ("#     #     #     #     #\n");
@@ -184,8 +193,7 @@ main ()
 				stop_audio();
 				break;
 			case 'l':
-				//load_audio(AdrStack);
-				load_audio(0x20000);
+				load_audio();
 				break;
 
 		}
@@ -207,6 +215,10 @@ void play_audio ( void ){
 	uint32_t align;
 
 	printf("Playing\n");
+	if (!audio_info.is_valid) {
+		printf("No audio is loaded in memory, load some audio first\n");
+		return;
+	}
 	//printf("Number of samples %d\n", num_samples);
 	printf("Number of samples: %d\n",audio_info.num_samples);
 	printf("Channels: %d\n",audio_info.is_stereo?2:1);
@@ -476,18 +488,7 @@ void stop_audio ( void ){
 	printf("Stopping\n");
 }
 
-//#define FAST_TEST
-#ifdef FAST_TEST
-char raw_data[] =
-{
-0x52, 0x49, 0x46, 0x46, 0xf8, 0xad, 0x36, 0x00, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
-0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x44, 0xac, 0x00, 0x00, 0x10, 0xb1, 0x02, 0x00,
-0x04, 0x00, 0x10, 0x00, 0x64, 0x61, 0x74, 0x61, 0xd4, 0xad, 0x36, 0x00, 0x00, 0x00, 0x00, 0x00
-//, 0xFF, 0xFF, 0xFF
-};
-#endif
-
-void load_audio ( unsigned int address ){
+void load_audio (){
 	struct riff_header *riff_header_ptr;
 	struct fmt *fmt_ptr;
 	struct data *data_ptr;
@@ -509,40 +510,17 @@ void load_audio ( unsigned int address ){
 	int j;
 	int idx;
 
-#ifdef FAST_TEST
-	
-	printf("Size of raw data: %d\n",sizeof(raw_data));
-	//stream = open_memstream (&wav_data, &wav_data_size);
-	//fprintf (stream, "hello");
-	//fprintf (stream, ", world");
-	for (i = 0; i < sizeof(raw_data) ; i++) {
-		printf("raw data[%d]: %x\n",i,raw_data[i]);
-		//if (i == 40)
-		//	fputc(0xff,stream);
-		//fputc(raw_data[i],stream);
-		wav_data[i] = raw_data[i];
+	if (audio_info.is_valid) {
+		printf ("Previously loaded audio, releasing memory at address %x first...\n",(int)audio_info.wav_data);
+		free(audio_info.wav_data);
 	}
-	//fclose (stream);
-	if (sizeof(raw_data) != wav_data_size) {
-		printf("Size doesn't match : %d\n",wav_data_size);
-	}
-	for (i = 0; i < sizeof(raw_data) ; i++) {
-		if (wav_data[i] != raw_data[i]) {
-			printf("Difference in element %d: %x != %x\n",i,
-				raw_data[i], wav_data[i]);
-		}
-	}
-	//wav_data = (char *) 0x0FFF ;
-	printf("Address given to wav_data %x\n",wav_data);
-	//wav_data = raw_data;
-	file_size = sizeof(raw_data);
 
-#else
+	audio_info.is_valid = 0;
 
 	wav_data = 0;
-	printf("Loading Audio at address %0x\n", address);
 	//file_size = xmodemReceive((char *) address, FILE_MAX_SIZE);   
 	file_size = xmodemReceive(&wav_data, FILE_MAX_SIZE);   
+	audio_info.wav_data = wav_data;
 	if (file_size < 0 || file_size > FILE_MAX_SIZE) {
 		printf ("Xmodem error file size 0x%x \n", file_size);
 		free(wav_data);
@@ -552,32 +530,11 @@ void load_audio ( unsigned int address ){
 
 	//printf("Address given to wav_data %x\n",wav_data);
 	//wav_data = (char *) address;
-#endif
-
-/*
-	// File dump start:
-	fullrows = file_size / columns;
-	lastrow = file_size % columns;
-	printf("file size %d\n", file_size);
-	printf("full rows %d\n", fullrows);
-	printf("last rows %d\n", lastrow);
-	idx = 0;
-	for (i = 0 ; i < fullrows ; i++) {
-		for (j = 0 ; j < columns ; j++) {
-			printf("0x%02x,",wav_data[idx++]);
-		}
-		printf("\n");
-	}
-	for (i = 0 ; i < lastrow ; i++) {
-		printf("0x%02x%c",wav_data[idx++],(i==(lastrow-1))?'\n':',' );
-	}
-	// File dump end
-*/
-
 
 
 	if ( (((int)wav_data) & 0x03) != 0 ) {
-		printf("Load address is not aligned to 32 bits\n");
+		printf("FATAL_ERROR: Load address is not aligned to 32 bits\n");
+		free(wav_data);
 		while(1);
 	}
 
@@ -586,10 +543,11 @@ void load_audio ( unsigned int address ){
 		riff_header_ptr->Format != 0x45564157  ||
 		riff_header_ptr->ChunkSize < 20 ) {
 
-		printf("There is something wrong with the RIFF format, not a WAVE or too small\n");
+		printf("ERROR: There is something wrong with the RIFF format, not a WAVE or too small\n");
 		printf("ID %0x\n",riff_header_ptr->ChunkID);
 		printf("Size %d\n",riff_header_ptr->ChunkSize);
 		printf("Format %0x\n",riff_header_ptr->Format);
+		free(wav_data);
 		return ;
 	}
 	fmt_ptr = (struct fmt *)&wav_data[12];
@@ -606,7 +564,8 @@ void load_audio ( unsigned int address ){
 	data_ptr = (struct data *)&wav_data[20 + fmt_ptr->Subchunk1Size];
 	// Comparing agains "data"
 	if (data_ptr->Subchunk2ID != 0x61746164) {
-		printf("Invalid data chuck, it must start with 'data' %x\n", data_ptr->Subchunk2ID);
+		printf("ERROR: Invalid data chuck, it must start with 'data' %x\n", data_ptr->Subchunk2ID);
+		free(wav_data);
 		return ;
 	}
 	printf("Data info:\n");
@@ -621,6 +580,7 @@ void load_audio ( unsigned int address ){
 		if(num_samples&0x01) {
 			printf("ERROR: Wrong wav format, size of subchunk is %d and 2 "
 				"channels but size is not multiple of 2\n", data_ptr->Subchunk2Size);
+			free(wav_data);
 			while(1);
 		}
 		num_samples >>= 1;
@@ -630,25 +590,29 @@ void load_audio ( unsigned int address ){
 	} else {
 		printf("ERROR: Unsupported number of channels %d, only stereo "
 			"and mono is supported\n", fmt_ptr->NumChannels);
+		free(wav_data);
 		while(1);
 	}
+	// Only 16 bit wavs are supported for now
 	switch ( fmt_ptr->BitsPerSample) {
-		case 8:
-			break;
+		//case 8:
+		//	break;
 		case 16:
 			if(num_samples&0x01) {
 				printf("ERROR: Wrong wav format, size of subchunk is %d and 16 "
 					"bits per sample, but size not multiple or 2 or 4\n",
 					data_ptr->Subchunk2Size);
+				free(wav_data);
 				while(1);
 			}
 			num_samples >>= 1;
 			break;
-		case 32:
-			num_samples >>= 2;
-			break;
+		//case 32:
+		//	num_samples >>= 2;
+		//	break;
 		default:
-			printf("Invalid bits per sample %x\n", fmt_ptr->BitsPerSample);
+			printf("ERROR: Invalid bits per sample %x\n", fmt_ptr->BitsPerSample);
+			free(wav_data);
 			return ;
 			break;
 	}
@@ -681,28 +645,56 @@ void load_audio ( unsigned int address ){
 	
 	// No interpolation:
         uint32_t sampling_rate = fmt_ptr->SampleRate;
-	audio_info.inter = 1;
+	if (sampling_rate > 48000 || sampling_rate < 8000) {
+		printf("ERROR: Sampling rate is unsupported %d\n", sampling_rate);
+		free(wav_data);
+		while(1);
+	}
+	switch (sampling_rate) {
+		case 44100:
+		case 48000:
+		case 32000:
+			// These are the primary sampling rates supported:
+			audio_info.fs = sampling_rate;
+			audio_info.inter = 1;
+			audio_info.eq_en = 1;
+			break;
+		case 22050:
+		case 24000:
+		case 16000:
+			audio_info.fs = sampling_rate*2;
+			audio_info.inter = 2;
+			audio_info.eq_en = 1;
+			break;
+		case 11025:
+		case 12000:
+		case  8000:
+			audio_info.fs = sampling_rate*4;
+			audio_info.inter = 4;
+			audio_info.eq_en = 1;
+			break;
+		default:
+			printf("WARNING: Sampling rate %d is unsupported for EQ, no interpolation\n", sampling_rate);
+			audio_info.fs = sampling_rate;
+			audio_info.inter = 1;
+			audio_info.eq_en = 0;
+			break;
+	}
 	
-	// Preset for 11k:
-        //uint32_t sampling_rate = 44100;
-	//audio_info.inter = 4;
-	
-	// Preset for 16k:
-        //uint32_t sampling_rate = 32000;
-	//audio_info.inter = 2;
-
         //uint32_t sampling_rate = 48000;
         //int idiv = (pwm_clk_freq/0x3FF)/sampling_rate;
         //int idiv = (pwm_clk_freq/(1<<10))/sampling_rate;
-        int idiv = (pwm_clk_freq>>bits_per_sample)/sampling_rate;
+        int idiv = (pwm_clk_freq>>bits_per_sample)/audio_info.fs;
         printf ("PWM Clk freq %d Hz\n",pwm_clk_freq);
         printf ("Bits per sample %d\n",bits_per_sample);
         printf ("Sampling rate %d Hz\n",sampling_rate);
+        printf ("Fs rate %d Hz\n",audio_info.fs);
         printf ("Interpolation %d\n",audio_info.inter);
         printf ("Int div %d\n",idiv);
 
         if (idiv < 1 || idiv > 0x1000) {
-                printf("idiv out of range: %x\n", idiv);
+                printf("FATAL_ERROR: idiv out of range: %x\n", idiv);
+		free(wav_data);
 		while(1);
         }
 #ifndef AVOID_HW_WRITES
@@ -734,6 +726,7 @@ void load_audio ( unsigned int address ){
     printf ("Range %d \n",range);
 
 	samples = (uint16_t *) sample_start;
+	audio_info.is_valid = 1;
 
 }
 

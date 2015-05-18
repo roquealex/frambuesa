@@ -292,6 +292,7 @@ int xmodemReceive(char **dest, int destsz)
 					//	size,len);
 					//for (i = 0 ; i < len ; i++)
 					//	printf("%02x ",(*dest)[i]);
+					//pbidx = 0;
 					return len; /* normal end */
 				case CAN:
                                         #ifdef DEBUG_XMODEM

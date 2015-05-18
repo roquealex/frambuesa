@@ -56,7 +56,7 @@ void print_spaces ( int num );
 void print_help ( void );
 void play_audio ( void );
 void stop_audio ( void );
-void load_audio ( unsigned int );
+void load_audio ( void );
 
 int16_t midpoint16(int16_t, int16_t);
 
