@@ -125,8 +125,10 @@ struct {
 	uint32_t is_stereo;
 	// Equalizer is enabled
 	uint32_t is_valid;
-	// Equalizer is enabled
+	// Equalizer is enabled (if supported by fs)
 	uint32_t eq_en;
+	// Equalizer is enabled by user
+	uint32_t user_eq_en;
 } audio_info;
 
 //#define SAMPLE_BUFF_SIZE (1<<9) // FAIL
@@ -170,6 +172,7 @@ main ()
 
 
 	audio_info.is_valid = 0;
+	audio_info.user_eq_en = 1;
 
     //printf ("Hello, World!\n");
 	printf ("#     #     #     #     #\n");
@@ -201,6 +204,9 @@ main ()
 				break;
 			case 'l':
 				load_audio();
+				break;
+			case 'e':
+				eq_enable();
 				break;
 
 		}
@@ -235,6 +241,7 @@ void play_audio ( void ){
 		unsigned int samples_per_buffer;
 		unsigned int left_samples = audio_info.num_samples;
 		int buffer_num = 0;
+		uint32_t min_delta_time = 0xffffffff;
 
 		// Initializing the samples:
 		for (i = 0; i < 2 ; i++) {
@@ -324,56 +331,47 @@ void play_audio ( void ){
 						}
 						/*
 						*/
-						/*
-						if (k == 1) {
-							curr_sample = sample[j];
-						} else {
-							//uint32_t thiss;
-							//thiss = ((uint32_t)sample[j]+(uint32_t)last_sample[j])>>1;
-							//curr_sample = thiss;
-							//curr_sample = ((int32_t)sample[j]+(int32_t)last_sample[j])>>1;
-							curr_sample = midpoint16(sample[j],last_sample[j]);
-						}
-						*/
-						/* Interpolation done here before last sample is assigned */
-						// Sign extend the sample to 32 bits:
 
-						// From this point we don't want to do complex 
-						// memory access in the loops so getting a
-						// direct pointer to x[] and a copy of ptr
-						xptr = x[j];
-						xidxptr = xidx[j];
-						x[j][xidx[j]] = curr_sample;
-						//xptr[xidxptr] = curr_sample;
 
-						curr_sample32 = 0;
-						//printf("value of idx at the beginning: %d\n", xidx[j]);
-						//for(l = 0 ; l < FIR_ORDER ; l++) {
-						for(l = 0 ; l < 32 ; l++) {
-							//curr_sample32 += ((int32_t)b_high_pass_44k1[l] *
-							/*
-							curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
-									x[j][xidx[j]]);
-							xidx[j]++;
+						if ( audio_info.user_eq_en && audio_info.eq_en ) {
+							// From this point we don't want to do complex 
+							// memory access in the loops so getting a
+							// direct pointer to x[] and a copy of ptr
+							xptr = x[j];
+							xidxptr = xidx[j];
+							//x[j][xidx[j]] = curr_sample;
+							xptr[xidxptr] = curr_sample;
+
+							curr_sample32 = 0;
+							//printf("value of idx at the beginning: %d\n", xidx[j]);
+							for(l = 0 ; l < FIR_ORDER ; l++) {
+								//curr_sample32 += ((int32_t)b_high_pass_44k1[l] *
+								/*
+								curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
+										x[j][xidx[j]]);
+								xidx[j]++;
+								xidx[j]&=(FIR_ORDER-1);
+								*/
+								// Reoimplementing with copies:
+								curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
+										xptr[xidxptr++]);
+								//xidxptr++;
+								xidxptr&=(FIR_ORDER-1);
+							}
+							//printf("value of idx at the end: %d\n", xidx[j]);
+							// In theory we should return the value of xidxptr
+							// to xidx[j] but in practice at the end of the loop
+							// xidxptr is the same as the original xidx[j] because
+							// it is a circular index on 64 elements.
+							xidx[j]--;
 							xidx[j]&=(FIR_ORDER-1);
-							*/
-							// Reoimplementing with copies:
-							curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
-									xptr[xidxptr++]);
-							//xidxptr++;
-							xidxptr&=(FIR_ORDER-1);
+
+							curr_sample32 >>= 15;
+						} else {
+							// Sign extend the sample to 32 bits:
+							curr_sample32 = (int32_t)curr_sample;
 						}
-						//printf("value of idx at the end: %d\n", xidx[j]);
-						// In theory we should return the value of xidxptr
-						// to xidx[j] but in practice at the end of the loop
-						// xidxptr is the same as the original xidx[j] because
-						// it is a circular index on 64 elements.
-						xidx[j]--;
-						xidx[j]&=(FIR_ORDER-1);
 
-						curr_sample32 >>= 15;
-
-						//curr_sample32 = (int32_t)curr_sample;
 						// Moving the sample to all positive range
 						curr_sample32 += 0x8000;
 						curr_sample32 >>= 6;
@@ -430,21 +428,32 @@ void play_audio ( void ){
 			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
 			// If by the time we reached this point the other DMA engine
 			// already finished our processing is too slow.
+#ifndef AVOID_HW_WRITES
 			if (dma[buffer_num^1][DMA_CS] & DMA_CS_END){
 				printf("FATAL_ERROR: The processing of data was too slow\n");
 				printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
 				pwm[PWM_CTL] = 0;
 				while(1);
 			}
+#endif
 			// Don't do this wait on the first loop
 			// otherwise wait for the other DMA to finish
 			if (initial_idx != 0) {
+				uint32_t ts0, delta_time;
+				ts0 = RPI_GetTimeStamp();
 				// Wait for the other DMA channel to finish to activate this one
 				while(!(dma[buffer_num^1][DMA_CS] & DMA_CS_END));
 				// Technically we need to write only the END bit so we
 				// would need to apply an or mask but in reality we want
 				// to write everything in zero for this particular case
 				dma[buffer_num^1][DMA_CS] = DMA_CS_END;
+				//delta_time = RPI_GetTimeStamp();
+				//printf("time %u - %u\n",delta_time,ts0);
+				//if (ts0 > delta_time) printf("ROLLOVER\n");
+				//delta_time -= ts0;
+				delta_time = RPI_GetTimeStamp() - ts0;
+				//printf("Delta time %d\n",delta_time);
+				if (min_delta_time > delta_time) min_delta_time = delta_time;
 			}
 			// Play the next buffer
 			dma[buffer_num][DMA_CS] = DMA_CS_ACTIVE;
@@ -519,15 +528,53 @@ void play_audio ( void ){
 		// to write everything in zero for this particular case
 		dma[buffer_num^1][DMA_CS] = DMA_CS_END;
 
+		// Cool down the PWM to avoid that clicking sound:
+		// the algorithm uses last_sample but thats not a
+		// given since when filtering is used the last value
+		// in the pwm might be different from these
+		//printf("Last samples %d %d\n", last_sample[1], last_sample[0]);
+		for (i = 0; i < 2 ; i++) {
+			last_sample[i] >>= 6;
+			last_sample[i] += 0x0200;
+		}
+		while (last_sample[1] != 0 || last_sample[0] != 0) {
+			for (i = 0; i < 10 ; i++) {
+				for (j = 0; j < 2 ; j++) {
+					while((pwm[PWM_STA] & 0x01) == 1);
+					pwm[PWM_FIF1] = last_sample[j];
+					//printf("Last sample %d %d\n", j, last_sample[j]);
+				}
+				//printf("Last samples %d %d\n", last_sample[1], last_sample[0]);
+			}
+			for (i = 0; i < 2 ; i++)
+				if (last_sample[i] != 0) last_sample[i]--;
+		}
+		for (i = 0; i < 2 ; i++) {
+			while((pwm[PWM_STA] & 0x01) == 1);
+			pwm[PWM_FIF1] = 0;
+		}
+
 		// Stop PWM:
 		printf("At the end Left samples %d\n", left_samples);
 		pwm[PWM_CTL] = 0;
 		free(mem);
 		printf("Done Playing\n");
+		printf("Minimun slack after processing data and next DMA start %u us\n", min_delta_time);
 	} // if (num_samples > 0 ) 
 }
 void stop_audio ( void ){
 	printf("Stopping\n");
+}
+
+// Toggles the user eq en flag
+void eq_enable ( void ){
+	if (audio_info.user_eq_en) {
+		printf("Disabling equalizer\n");
+		audio_info.user_eq_en = 0;
+	} else {
+		printf("Enabling equalizer\n");
+		audio_info.user_eq_en = 1;
+	}
 }
 
 void load_audio (){
@@ -692,6 +739,9 @@ void load_audio (){
 		free(wav_data);
 		while(1);
 	}
+	// Fastest interpolation
+	//sampling_rate = 12000;
+	//sampling_rate = 48000;
 	switch (sampling_rate) {
 		case 44100:
 		case 48000:
@@ -791,6 +841,11 @@ void print_help ( void )
     printf("x");                     
     print_spaces(29);
     printf(": exit (boot loader)\n");
+
+    printf("e");                     
+    print_spaces(29);
+    printf(": Enable/Disable Equalizer (Currently %s)\n",audio_info.user_eq_en?"Enabled":"Disabled");
+
 
     printf("h");                     
     print_spaces(29);
