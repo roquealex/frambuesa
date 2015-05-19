@@ -53,6 +53,8 @@
 #include "rpi-gpio.h"
 #include "rpi-systimer.h"
 
+#include "fir.h"
+
 #define BCM2708_PERI_BASE       0x20000000
 //#define GPIO_BASE               (BCM2708_PERI_BASE + 0x200000) /* GPIO controller */
 //#define PWM_BASE                (BCM2708_PERI_BASE + 0x20C000) /* PWM controller */
@@ -129,9 +131,9 @@ struct {
 
 //#define SAMPLE_BUFF_SIZE (1<<9) // FAIL
 // Works:
-#define SAMPLE_BUFF_SIZE (1<<10)
+//#define SAMPLE_BUFF_SIZE (1<<10)
 // 64K
-//#define SAMPLE_BUFF_SIZE (1<<14)
+#define SAMPLE_BUFF_SIZE (1<<14)
 // 256K
 //#define SAMPLE_BUFF_SIZE (1<<16)
 //2^20/2^2:
@@ -212,7 +214,6 @@ main ()
 
 
 void play_audio ( void ){
-	int i = 0;
 
 	// Memory to hold the control blocks for DMA
 	void *mem;
@@ -227,9 +228,20 @@ void play_audio ( void ){
 	printf("Number of samples: %d\n",audio_info.num_samples);
 	printf("Channels: %d\n",audio_info.is_stereo?2:1);
 	if (audio_info.num_samples > 0 ) {
+		int i = 0;
+		int j;
+		int16_t x[2][FIR_ORDER];
+		int xidx[2] = {0,0};
 		unsigned int samples_per_buffer;
 		unsigned int left_samples = audio_info.num_samples;
 		int buffer_num = 0;
+
+		// Initializing the samples:
+		for (i = 0; i < 2 ; i++) {
+			for (j = 0; j < FIR_ORDER ; j++) {
+				x[i][j] = 0;
+			}
+		}
 
 		// Allocating space for 2 control blocks
 		align = sizeof(dma_cb_t);
@@ -267,7 +279,6 @@ void play_audio ( void ){
 			for (i = 0 ; i < size_of_loop ; i ++) {
 				// Maximun interpolation supported is 4
 				//uint32_t interarr[4];
-				int j;
 				//int idx = (audio_info.is_stereo)?i*2:i;
 				int idx = (initial_idx+i);
 				if(audio_info.is_stereo) idx *= 2;
@@ -294,9 +305,12 @@ void play_audio ( void ){
 					// for 2 and 4 interpolation we need the meed sample
 					if (audio_info.inter > 1) mid_sample = midpoint16(last_sample[j],sample[j]);
 					for (k = 0 ; k <audio_info.inter  ; k++) {
+						int l;
 						int16_t curr_sample;
 						int32_t curr_sample32;
 						curr_sample = sample[j];
+		int16_t *xptr;
+		int xidxptr;
 						
 						if ( k == (audio_info.inter-1) ){
 							curr_sample = sample[j];
@@ -323,7 +337,43 @@ void play_audio ( void ){
 						*/
 						/* Interpolation done here before last sample is assigned */
 						// Sign extend the sample to 32 bits:
-						curr_sample32 = (int32_t)curr_sample;
+
+						// From this point we don't want to do complex 
+						// memory access in the loops so getting a
+						// direct pointer to x[] and a copy of ptr
+						xptr = x[j];
+						xidxptr = xidx[j];
+						x[j][xidx[j]] = curr_sample;
+						//xptr[xidxptr] = curr_sample;
+
+						curr_sample32 = 0;
+						//printf("value of idx at the beginning: %d\n", xidx[j]);
+						//for(l = 0 ; l < FIR_ORDER ; l++) {
+						for(l = 0 ; l < 32 ; l++) {
+							//curr_sample32 += ((int32_t)b_high_pass_44k1[l] *
+							/*
+							curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
+									x[j][xidx[j]]);
+							xidx[j]++;
+							xidx[j]&=(FIR_ORDER-1);
+							*/
+							// Reoimplementing with copies:
+							curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
+									xptr[xidxptr++]);
+							//xidxptr++;
+							xidxptr&=(FIR_ORDER-1);
+						}
+						//printf("value of idx at the end: %d\n", xidx[j]);
+						// In theory we should return the value of xidxptr
+						// to xidx[j] but in practice at the end of the loop
+						// xidxptr is the same as the original xidx[j] because
+						// it is a circular index on 64 elements.
+						xidx[j]--;
+						xidx[j]&=(FIR_ORDER-1);
+
+						curr_sample32 >>= 15;
+
+						//curr_sample32 = (int32_t)curr_sample;
 						// Moving the sample to all positive range
 						curr_sample32 += 0x8000;
 						curr_sample32 >>= 6;
@@ -377,7 +427,15 @@ void play_audio ( void ){
 			//dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)cb_ptr | 0xC0000000;
 			dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)&cb_ptr[buffer_num] ;
 			// Starting the DMA engine:
-			printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			// If by the time we reached this point the other DMA engine
+			// already finished our processing is too slow.
+			if (dma[buffer_num^1][DMA_CS] & DMA_CS_END){
+				printf("FATAL_ERROR: The processing of data was too slow\n");
+				printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+				pwm[PWM_CTL] = 0;
+				while(1);
+			}
 			// Don't do this wait on the first loop
 			// otherwise wait for the other DMA to finish
 			if (initial_idx != 0) {
@@ -390,7 +448,7 @@ void play_audio ( void ){
 			}
 			// Play the next buffer
 			dma[buffer_num][DMA_CS] = DMA_CS_ACTIVE;
-			printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
+			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
 
 #ifdef AVOID_HW_WRITES
 			// This code simulates the DMA transfer on emulator
