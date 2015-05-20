@@ -20,11 +20,6 @@ void RPI_WaitMicroSeconds( uint32_t us )
 
 uint32_t RPI_GetTimeStamp( void )
 {
-	//static uint32_t ts = 0;
-	//int r =rand()%400;
-	//int r =23;
-    //ts += (0x20000000 + r);
-    
     volatile uint32_t ts = rpiSystemTimer->counter_lo;
     return ts;
 }

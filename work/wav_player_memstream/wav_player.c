@@ -1,48 +1,40 @@
-/*----------------------------------------------------------------
-//                                                              //
-//  hello-world.c                                               //
-//                                                              //
-//  This file is part of the Amber project                      //
-//  http://www.opencores.org/project,amber                      //
-//                                                              //
-//  Description                                                 //
-//  Simple stand-alone example application.                     //
-//                                                              //
-//  Author(s):                                                  //
-//      - Conor Santifort, csantifort.amber@gmail.com           //
-//                                                              //
-//////////////////////////////////////////////////////////////////
-//                                                              //
-// Copyright (C) 2010 Authors and OPENCORES.ORG                 //
-//                                                              //
-// This source file may be used and distributed without         //
-// restriction provided that this copyright statement is not    //
-// removed from the file and that any derivative work contains  //
-// the original copyright notice and the associated disclaimer. //
-//                                                              //
-// This source file is free software; you can redistribute it   //
-// and/or modify it under the terms of the GNU Lesser General   //
-// Public License as published by the Free Software Foundation; //
-// either version 2.1 of the License, or (at your option) any   //
-// later version.                                               //
-//                                                              //
-// This source is distributed in the hope that it will be       //
-// useful, but WITHOUT ANY WARRANTY; without even the implied   //
-// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      //
-// PURPOSE.  See the GNU Lesser General Public License for more //
-// details.                                                     //
-//                                                              //
-// You should have received a copy of the GNU Lesser General    //
-// Public License along with this source; if not, download it   //
-// from http://www.opencores.org/lgpl.shtml                     //
-//                                                              //
-----------------------------------------------------------------*/
+//                                                              
+//  wav-player.c                                                
+//                                                              
+//  This file is part of wav player memstream                   
+//                                                              
+//  Description                                                 
+//  Bare metal raspberrypi wav player using PWM audio output    
+//                                                              
+//  Author(s):                                                  
+//      - Roque Arcudia, roquealex@gmail.com           
+//      - Conor Santifort, csantifort.amber@gmail.com (file transfer based on his bootloader)
+//                                                              
+//                                                              
+// Copyright (C) 2010 Authors and OPENCORES.ORG                 
+//                                                              
+// This source file may be used and distributed without         
+// restriction provided that this copyright statement is not    
+// removed from the file and that any derivative work contains  
+// the original copyright notice and the associated disclaimer. 
+//                                                              
+// This source file is free software; you can redistribute it   
+// and/or modify it under the terms of the GNU Lesser General   
+// Public License as published by the Free Software Foundation; 
+// either version 2.1 of the License, or (at your option) any   
+// later version.                                               
+//                                                              
+// This source is distributed in the hope that it will be       
+// useful, but WITHOUT ANY WARRANTY; without even the implied   
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      
+// PURPOSE.  See the GNU Lesser General Public License for more 
+// details.                                                     
+//                                                              
+// You should have received a copy of the GNU Lesser General    
+// Public License along with this source; if not, download it   
+// from http://www.opencores.org/lgpl.shtml                     
+//                                                              
 
-/* Note that the stdio.h referred to here is the one in
-   mini-libc. This applications compiles in mini-libc
-   so it can run stand-alone.
-*/   
-//#include "stdio.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include "wav_player.h"
@@ -56,8 +48,6 @@
 #include "fir.h"
 
 #define BCM2708_PERI_BASE       0x20000000
-//#define GPIO_BASE               (BCM2708_PERI_BASE + 0x200000) /* GPIO controller */
-//#define PWM_BASE                (BCM2708_PERI_BASE + 0x20C000) /* PWM controller */
 #define CLOCK_BASE              (BCM2708_PERI_BASE + 0x101000)
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
@@ -80,60 +70,10 @@ volatile unsigned int *dma[2] = {dma0,dma1};
 volatile unsigned int pwm[10];
 #endif
 
-/*
-void print_spaces ( int num );
-void print_help ( void );
-void play_audio ( void );
-void stop_audio ( void );
-void load_audio ( void );
-
-
-#define AMBER_AUDIO_SEQ_START_ADDRESS_OFF  0
-#define AMBER_AUDIO_SEQ_SAMPLE_COUNT_OFF   1
-#define AMBER_AUDIO_SEQ_CMD_OFF            2
-#define AMBER_AUDIO_SEQ_STATUS_OFF         3
-#define AMBER_AUDIO_SEQ_CHL_CONFIG_OFF     4
-#define AMBER_AUDIO_SEQ_SAMPLE_RATE_OFF    5
-*/
-
-
-//volatile unsigned int* audio_seq = (unsigned int*)AMBER_AUDIO_SEQ_BASE;
-//unsigned long audio_seq[8];
-//20000000 
-
-
-// This structure will save the current wav information required for playback
-struct {
-	// Number of samples per channel
-	unsigned int num_samples;
-
-	// Sample frequency for PWM 32k, 44.1k and 48k only
-	// the original wav sample freq is fs / 2^inter
-	uint32_t fs;
-
-	// Interpolation ration.
-	uint32_t inter;
-
-	// Pointer to the file in memory
-	char *wav_data;
-
-	// Direct pointer to the samples in memory,
-	// only 16 bit samples supported
-	int16_t *samples;
-
-	// 1 if 2 channel , else 0
-	uint32_t is_stereo;
-	// Equalizer is enabled
-	uint32_t is_valid;
-	// Equalizer is enabled (if supported by fs)
-	uint32_t eq_en;
-	// Equalizer setting, check eq_setting_str for settings
-	// Disable eq should always be the last
-	uint32_t eq_setting;
-} audio_info;
+audio_info_t audio_info;
 
 #define EQ_SETTINGS_NUM 3
-char *eq_setting_str[EQ_SETTINGS_NUM] = {"Low pass","High pass","Disabled"};
+const char *eq_setting_str[EQ_SETTINGS_NUM] = {"Low pass","High pass","Disabled"};
 const int16_t *b_32k[EQ_SETTINGS_NUM-1] = {b_low_32k,b_high_32k};
 const int16_t *b_44k1[EQ_SETTINGS_NUM-1] = {b_low_44k1,b_high_44k1};
 const int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
@@ -154,7 +94,6 @@ const int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
 uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
 
 
-extern unsigned int AdrStack;
 main () 
 {
 	char c;
@@ -190,7 +129,7 @@ main ()
 	printf ("#  #  #  #######   #   #\n");
 	printf ("#  #  #  #     #    # #\n");
 	printf (" ## ##   #     #     #\n");
-	printf ("\nWAV Player (mem stream v1.0)\n\n");
+	printf ("\nWAV Player (mem stream v1.1)\n\n");
 
 	print_help();
 	printf("Ready\n> ");
@@ -220,10 +159,6 @@ main ()
 		}
 		
 	} while (c != 'x');
-	printf ("END\n");
-    /* Flush out UART FIFO */
-    printf ("                ");
-    //_testpass();
 }
 
 
@@ -351,8 +286,9 @@ void play_audio ( void ){
 						int16_t curr_sample;
 						int32_t curr_sample32;
 						curr_sample = sample[j];
-		int16_t *xptr;
-		int xidxptr;
+						// For faster speed get a pointer to data and a copy to index
+						int16_t *xptr;
+						int xidxptr;
 						
 						if ( k == (audio_info.inter-1) ){
 							curr_sample = sample[j];
@@ -434,7 +370,7 @@ void play_audio ( void ){
 			left_samples -= size_of_loop;
 			// Now play the buffer
 			//cb_ptr[0].ti = DMA_S_INC | DMA_D_INC ;
-			cb_ptr[buffer_num].ti = DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_S_INC | DMA_D_DREQ | (5<<16);
+			cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC | DMA_TI_D_DREQ | (5<<16);
 			//DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_D_DREQ | DMA_PER_MAP(5);
 			//cb_ptr[0].ti = DMA_WAIT_RESP | DMA_S_INC | (5<<16);
 			cb_ptr[buffer_num].source_ad = (uint32_t) &sample_buffer[buffer_num][0] ;
@@ -616,6 +552,7 @@ void load_audio (){
 	void *sample_start;
 	void *wav_start;
 	unsigned int offset;
+	uint32_t range;
 	int i;
 
 	FILE *stream;
@@ -746,9 +683,6 @@ void load_audio (){
 	printf("Wav start: %x\n",(unsigned int)wav_start);
 	printf("Offset calculation: %d\n",((unsigned int)sample_start - (unsigned int)wav_start));
 	printf("Offset: %d\n",offset);
-	//audio_seq[AMBER_AUDIO_SEQ_START_ADDRESS_OFF] = (unsigned int)sample_start;
-	//audio_seq[AMBER_AUDIO_SEQ_SAMPLE_COUNT_OFF] = num_samples;
-	//audio_seq[AMBER_AUDIO_SEQ_SAMPLE_COUNT_OFF] = data_ptr->Subchunk2Size;
 		
 	// Setting up the clock for pwm:
 
@@ -835,18 +769,14 @@ void load_audio (){
 
         RPI_WaitMicroSeconds( 100 );
 
-    //pwm[PWM_RNG1] = 0x0000FFFF;
-    //pwm[PWM_RNG1] = 3200;
-    //pwm[PWM_DAT1] = 1600;
-	//range = 8000;
 #endif
-	uint32_t range = 1<<bits_per_sample;
+	range = 1<<bits_per_sample;
 #ifndef AVOID_HW_WRITES
-    pwm[PWM_RNG1] = range;
-    pwm[PWM_RNG2] = range;
+	pwm[PWM_RNG1] = range;
+	pwm[PWM_RNG2] = range;
 #endif
 
-    printf ("Range %d \n",range);
+	printf ("Range %d \n",range);
 
 	audio_info.samples = (uint16_t *) sample_start;
 	audio_info.is_valid = 1;
@@ -881,37 +811,6 @@ void print_help ( void )
     print_spaces(29);
     printf(": help\n");
 
-    /*
-    printf("b <address>");                   
-    print_spaces(19);
-    printf(": Load binary file to <address>\n");
-
-    printf("d <start address> <num bytes> : Dump mem\n");
-
-    printf("h");                     
-    print_spaces(29);
-    printf(": Print help message\n");
-
-    printf("j <address>");                     
-    print_spaces(19);
-    printf(": Execute loaded elf, jumping to <address>\n");
-
-    printf("p <address>");                   
-    print_spaces(19);
-    printf(": Print ascii mem until first 0\n");
-    
-    printf("r <address>");                   
-    print_spaces(19);
-    printf(": Read mem\n");
-
-    printf("s");                              
-    print_spaces(29);
-    printf(": Core status\n");
-    
-    printf("w <address> <value>");            
-    print_spaces(11);
-    printf(": Write mem\n");    
-    */
 }
 int16_t midpoint16(int16_t a,int16_t b) {
 	return ((int32_t)a+(int32_t)b)>>1;

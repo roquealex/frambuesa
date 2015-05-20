@@ -24,18 +24,6 @@
 
 #define DMA15_BASE       0x20E05000UL
 
-/*
-0x0 0_CS DMA Channel 0 Control and Status 32
-0x4 0_CONBLK_AD DMA Channel 0 Control Block Address 32
-0x8 0_TI DMA Channel 0 CB Word 0 (Transfer Information) 32
-0xc 0_SOURCE_AD DMA Channel 0 CB Word 1 (Source Address) 32
-0x10 0_DEST_AD DMA Channel 0 CB Word 2 (Destination Address) 32
-0x14 0_TXFR_LEN DMA Channel 0 CB Word 3 (Transfer Length) 32
-0x18 0_STRIDE DMA Channel 0 CB Word 4 (2D Stride) 32
-0x1c 0_NEXTCONBK DMA Channel 0 CB Word 5 (Next CB Address) 32
-0x20 0_DEBUG DMA Channel 0 Debug
-*/
-
 #define DMA_CS 0
 #define DMA_CONBLK_AD 1
 #define DMA_TI 2
@@ -66,14 +54,14 @@ typedef struct {
 #define DMA_CS_ABORT       (1<<(30))
 #define DMA_CS_RESET       (1<<(31))
 
-#define DMA_INT_EN      (1)
-#define DMA_WAIT_RESP   (1<<(3))
-#define DMA_D_INC       (1<<(4))
-#define DMA_D_DREQ      (1<<(6))
-#define DMA_S_INC       (1<<(8))
-#define DMA_S_DREQ      (1<<(10))
-#define DMA_NO_WIDE_BURSTS	(1<<26)
-#define DMA_PER_MAP(x)		((x)<<16)
+#define DMA_TI_INT_EN      (1)
+#define DMA_TI_WAIT_RESP   (1<<(3))
+#define DMA_TI_D_INC       (1<<(4))
+#define DMA_TI_D_DREQ      (1<<(6))
+#define DMA_TI_S_INC       (1<<(8))
+#define DMA_TI_S_DREQ      (1<<(10))
+#define DMA_TI_NO_WIDE_BURSTS	(1<<26)
+#define DMA_TI_PER_MAP(x)		((x)<<16)
 
 #define DMA_DEBUG_READ_ERROR (1<<2)
 #define DMA_DEBUG_FIFO_ERROR (1<<1)
