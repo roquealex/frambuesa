@@ -127,9 +127,16 @@ struct {
 	uint32_t is_valid;
 	// Equalizer is enabled (if supported by fs)
 	uint32_t eq_en;
-	// Equalizer is enabled by user
-	uint32_t user_eq_en;
+	// Equalizer setting, check eq_setting_str for settings
+	// Disable eq should always be the last
+	uint32_t eq_setting;
 } audio_info;
+
+#define EQ_SETTINGS_NUM 3
+char *eq_setting_str[EQ_SETTINGS_NUM] = {"Low pass","High pass","Disabled"};
+const int16_t *b_32k[EQ_SETTINGS_NUM-1] = {b_low_32k,b_high_32k};
+const int16_t *b_44k1[EQ_SETTINGS_NUM-1] = {b_low_44k1,b_high_44k1};
+const int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
 
 //#define SAMPLE_BUFF_SIZE (1<<9) // FAIL
 // Works:
@@ -172,7 +179,8 @@ main ()
 
 
 	audio_info.is_valid = 0;
-	audio_info.user_eq_en = 1;
+	// Disabled by default (last position in the array)
+	audio_info.eq_setting = (EQ_SETTINGS_NUM-1);
 
     //printf ("Hello, World!\n");
 	printf ("#     #     #     #     #\n");
@@ -206,7 +214,7 @@ main ()
 				load_audio();
 				break;
 			case 'e':
-				eq_enable();
+				eq_setting();
 				break;
 
 		}
@@ -236,12 +244,39 @@ void play_audio ( void ){
 	if (audio_info.num_samples > 0 ) {
 		int i = 0;
 		int j;
+		int user_eq_en;
 		int16_t x[2][FIR_ORDER];
 		int xidx[2] = {0,0};
 		unsigned int samples_per_buffer;
 		unsigned int left_samples = audio_info.num_samples;
 		int buffer_num = 0;
 		uint32_t min_delta_time = 0xffffffff;
+		const int16_t *b_fir;
+		//int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
+
+		if (audio_info.eq_setting == (EQ_SETTINGS_NUM-1)) {
+			user_eq_en = 0;
+		} else {
+			user_eq_en = 1;
+			switch(audio_info.fs) {
+				case 32000:
+					b_fir = b_32k[audio_info.eq_setting];
+					break;
+				case 44100:
+					b_fir = b_44k1[audio_info.eq_setting];
+					break;
+				case 48000:
+					b_fir = b_48k[audio_info.eq_setting];
+					break;
+				default:
+					user_eq_en = 0;
+					break;
+			}
+			if (user_eq_en) {
+				printf("Playing audio with Equalizer setting : %s\n",eq_setting_str[audio_info.eq_setting]);
+				//for (i = 0 ; i < FIR_ORDER ; i++) printf("%d\n",b_fir[i]);
+			}
+		}
 
 		// Initializing the samples:
 		for (i = 0; i < 2 ; i++) {
@@ -333,7 +368,7 @@ void play_audio ( void ){
 						*/
 
 
-						if ( audio_info.user_eq_en && audio_info.eq_en ) {
+						if ( user_eq_en && audio_info.eq_en ) {
 							// From this point we don't want to do complex 
 							// memory access in the loops so getting a
 							// direct pointer to x[] and a copy of ptr
@@ -353,7 +388,7 @@ void play_audio ( void ){
 								xidx[j]&=(FIR_ORDER-1);
 								*/
 								// Reoimplementing with copies:
-								curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
+								curr_sample32 += ((int32_t)b_fir[l] *
 										xptr[xidxptr++]);
 								//xidxptr++;
 								xidxptr&=(FIR_ORDER-1);
@@ -567,14 +602,10 @@ void stop_audio ( void ){
 }
 
 // Toggles the user eq en flag
-void eq_enable ( void ){
-	if (audio_info.user_eq_en) {
-		printf("Disabling equalizer\n");
-		audio_info.user_eq_en = 0;
-	} else {
-		printf("Enabling equalizer\n");
-		audio_info.user_eq_en = 1;
-	}
+void eq_setting ( void ){
+	// round robin
+	audio_info.eq_setting = (audio_info.eq_setting == (EQ_SETTINGS_NUM-1))?0:audio_info.eq_setting+1;
+	printf("Changing equalizer setting to %s\n", eq_setting_str[audio_info.eq_setting]);
 }
 
 void load_audio (){
@@ -844,8 +875,7 @@ void print_help ( void )
 
     printf("e");                     
     print_spaces(29);
-    printf(": Enable/Disable Equalizer (Currently %s)\n",audio_info.user_eq_en?"Enabled":"Disabled");
-
+    printf(": Change EQ Setting (Currently %s)\n",eq_setting_str[audio_info.eq_setting]);
 
     printf("h");                     
     print_spaces(29);

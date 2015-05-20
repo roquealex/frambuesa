@@ -57,7 +57,7 @@ void print_help ( void );
 void play_audio ( void );
 void stop_audio ( void );
 void load_audio ( void );
-void eq_enable ( void );
+void eq_setting ( void );
 
 int16_t midpoint16(int16_t, int16_t);
 
