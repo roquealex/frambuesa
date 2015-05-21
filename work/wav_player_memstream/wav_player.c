@@ -47,10 +47,12 @@
 
 #include "fir.h"
 
+/*
 #define BCM2708_PERI_BASE       0x20000000
 #define CLOCK_BASE              (BCM2708_PERI_BASE + 0x101000)
 #define PWMCLK_CNTL 40
 #define PWMCLK_DIV  41
+*/
 
 //#define AVOID_HW_WRITES
 
@@ -129,10 +131,10 @@ main ()
 	printf ("#  #  #  #######   #   #\n");
 	printf ("#  #  #  #     #    # #\n");
 	printf (" ## ##   #     #     #\n");
-	printf ("\nWAV Player (mem stream v1.1)\n\n");
+	printf ("\nWAV Player (mem stream v1.2)\n\n");
 
 	print_help();
-	printf("Ready\n> ");
+	printf("Ready>\n");
 
 	do {
 		printf("\n? ");
@@ -755,17 +757,19 @@ void load_audio (){
 		while(1);
         }
 #ifndef AVOID_HW_WRITES
-        *(clk + PWMCLK_DIV)  = 0x5A000000 | (idiv<<12);
+        clk[PWMCLK_DIV]  = 0x5A000000 | (idiv<<12);
 
         // source=osc and enable clock
         //*(clk + PWMCLK_CNTL) = 0x5A000011; // 19.2 Mhz
         //*(clk + PWMCLK_CNTL) = 0x5A000015; // 1000Mhz
         //*(clk + PWMCLK_CNTL) = 0x5A000014; // none
-        *(clk + PWMCLK_CNTL) = 0x5A000016; // 500Mhz
+        //*(clk + PWMCLK_CNTL) = 0x5A000016; // 500Mhz
+        clk[PWMCLK_CNTL] = 0x5A000016; // 500Mhz
 
 
         // disable PWM
-        *(pwm + PWM_CTL) = 0;
+        pwm[PWM_CTL] = 0;
+        //*(pwm + PWM_CTL) = 0;
 
         RPI_WaitMicroSeconds( 100 );
 
