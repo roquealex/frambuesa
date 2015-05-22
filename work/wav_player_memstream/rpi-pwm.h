@@ -89,7 +89,7 @@ rpi_pwm_ctl_t fields;
 } rpi_pwm_ctl_reg_t;
 
 
-#define PWM_DMAC_ENAB 31 /* DMA Enable */
+#define PWM_DMAC_ENAB (0x01UL<<31) /* DMA Enable */
 //15:8 PANIC DMA Threshold for PANIC signal RW 0x7
 //7:0 DREQ DMA Threshold for DREQ signal RW 0x7
 

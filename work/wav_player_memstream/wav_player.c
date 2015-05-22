@@ -99,31 +99,11 @@ uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
 main () 
 {
 	char c;
-	// Set up to mirror one of the PWM in GPIO:
-	uint32_t gpio_num;
-	uint32_t gpio_fsel_reg;
-	uint32_t gpio_fsel_lsb;
-	uint32_t gpio_fsel_regval;
-
-	gpio_num = 18; // PWM in different location
-
-	gpio_fsel_reg = (gpio_num/10) + GPIO_GPFSEL0 ;
-	gpio_fsel_lsb = (gpio_num%10) * 3 ;
-
-
-	// Read modify write routine:
-	gpio_fsel_regval = gpio[gpio_fsel_reg];
-	// programming 3'b001 to the right field
-	gpio_fsel_regval &= ~(0x7 << gpio_fsel_lsb);
-	gpio_fsel_regval |= (0x2 << gpio_fsel_lsb);
-	gpio[gpio_fsel_reg] = gpio_fsel_regval;
-
 
 	audio_info.is_valid = 0;
 	// Disabled by default (last position in the array)
 	audio_info.eq_setting = (EQ_SETTINGS_NUM-1);
 
-    //printf ("Hello, World!\n");
 	printf ("#     #     #     #     #\n");
 	printf ("#  #  #    # #    #     #\n");
 	printf ("#  #  #   #   #   #     #\n");
@@ -131,7 +111,7 @@ main ()
 	printf ("#  #  #  #######   #   #\n");
 	printf ("#  #  #  #     #    # #\n");
 	printf (" ## ##   #     #     #\n");
-	printf ("\nWAV Player (mem stream v1.2)\n\n");
+	printf ("\nWAV Player (mem stream v1.3)\n\n");
 
 	print_help();
 	printf("Ready>\n");
@@ -166,10 +146,6 @@ main ()
 
 void play_audio ( void ){
 
-	// Memory to hold the control blocks for DMA
-	void *mem;
-	dma_cb_t *cb_ptr;
-	uint32_t align;
 
 	printf("Playing\n");
 	if (!audio_info.is_valid) {
@@ -179,21 +155,35 @@ void play_audio ( void ){
 	printf("Number of samples: %d\n",audio_info.num_samples);
 	printf("Channels: %d\n",audio_info.is_stereo?2:1);
 	if (audio_info.num_samples > 0 ) {
-		int i = 0;
-		int j;
+		// Loop variables:
+		int i; // sample index (temporary sample buffer)
+		int j; // left/right index
+		unsigned int samples_per_buffer; // upper bound of i
+		unsigned int left_samples; // samples in the file per channel
+		int buffer_num = 0; // selects the temporary sample buffer
+		// DMA Variables:	
+		void *mem; // Memory to hold the control blocks for DMA
+		volatile dma_cb_t *cb_ptr; // Pointers to control block (indexed as array)
+		const uint32_t align = sizeof(dma_cb_t);
+		// FIR variables:
 		int user_eq_en;
-		int16_t x[2][FIR_ORDER];
-		int xidx[2] = {0,0};
-		unsigned int samples_per_buffer;
-		unsigned int left_samples = audio_info.num_samples;
-		int buffer_num = 0;
+		int16_t x[2][FIR_ORDER]; // prev samples L/R
+		int xidx[2] = {0,0}; // current index L/R
+		const int16_t *b_fir; // current coefs
+		// Interpolation
+		int16_t last_sample[2] = {0,0}; // stores the last sample redundant with x[j][t-1]
+		// Profiling:
 		uint32_t min_delta_time = 0xffffffff;
-		const int16_t *b_fir;
-		//int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
 
+		// Select the current equalization coef
 		if (audio_info.eq_setting == (EQ_SETTINGS_NUM-1)) {
+			// Equaliztion is disabled if "disabled" setting is
+			// chosen which is the last entry in the array of
+			// EQ_SETTINGS_NUM size
 			user_eq_en = 0;
 		} else {
+			// Select the right array based on current sample
+			// frequency.
 			user_eq_en = 1;
 			switch(audio_info.fs) {
 				case 32000:
@@ -215,55 +205,56 @@ void play_audio ( void ){
 			}
 		}
 
-		// Initializing the samples:
+		// Initializing the previous samples:
 		for (i = 0; i < 2 ; i++) {
 			for (j = 0; j < FIR_ORDER ; j++) {
 				x[i][j] = 0;
 			}
 		}
 
-		// Allocating space for 2 control blocks
-		align = sizeof(dma_cb_t);
-		printf("Alignment to be used %d\n",align);
+		// Allocating space for 2 control blocks:
+		// According to the doc the address address must
+		// be 256 bit aligned, so the bottom 5 bits of
+		// the address must be zero.
 		mem = malloc(2*sizeof(dma_cb_t) + (align-1));
-		printf("Addr of mem = %x\n", (uintptr_t)mem);
+		//printf("Addr of mem = %x\n", (uintptr_t)mem);
 		cb_ptr = (dma_cb_t*)( ((uintptr_t)mem+(align-1)) & ~(uintptr_t)(align-1) );
-		printf("Addr of cb_ptr = %x\n", (uintptr_t)cb_ptr);
+		//printf("Addr of cb_ptr = %x\n", (uintptr_t)cb_ptr);
 
-		//pwm[PWM_CTL] = 0x00002161; // dual channel fifo m/s
-		// This is for stereo:
+		// Settings of the PWM
+		//pwm[PWM_CTL] = 0x00002161; // Raw expected config
 		pwm[PWM_CTL] = PWM_CTL_USEF2 | PWM_CTL_PWEN2 |
 			PWM_CTL_CLRF1 | PWM_CTL_USEF1 | PWM_CTL_PWEN1 ;
-		printf("PWM_CTL = %08x\n", pwm[PWM_CTL]);
-		//pwm[PWM_DMAC] = PWMDMAC_ENAB | PWMDMAC_THRSHLD;
-		pwm[PWM_DMAC] = 0x80000707;
+		//printf("PWM_CTL = %08x\n", pwm[PWM_CTL]);
+		//pwm[PWM_DMAC] = 0x80000707; // Raw expected config (using defaults)
+		pwm[PWM_DMAC] |= PWM_DMAC_ENAB;
+		//printf("PWM_DMAC = %08x\n", pwm[PWM_DMAC]);
 
 		dma[0][DMA_CS] = DMA_CS_RESET;
 		dma[1][DMA_CS] = DMA_CS_RESET;
 #ifndef AVOID_HW_WRITES
 		RPI_WaitMicroSeconds(1000);
-		printf("Reset done\n");
+		printf("Reset DMA done\n");
 #endif
 		// To start with the number of samples that a buffer can fit is
 		// half of the size since the buffer interleaves a left and a
 		// right sample.
 		samples_per_buffer = (SAMPLE_BUFF_SIZE/2);
 		samples_per_buffer /= audio_info.inter;
+		left_samples = audio_info.num_samples;
 
 		// This is temporary until we get the buffers for FIR
-			int16_t last_sample[2] = {0,0};
 		while (left_samples>0) {
 			int size_of_loop = (samples_per_buffer > left_samples) ? left_samples : samples_per_buffer ;
 			int initial_idx = audio_info.num_samples-left_samples ;
 			for (i = 0 ; i < size_of_loop ; i ++) {
 				// Maximun interpolation supported is 4
-				//uint32_t interarr[4];
-				//int idx = (audio_info.is_stereo)?i*2:i;
 				int idx = (initial_idx+i);
-				if(audio_info.is_stereo) idx *= 2;
-				//uint16_t sample = samples[initial_idx+idx] ^ 0x8000;
 				// Array of left and right current samples
 				int16_t sample[2];
+				if(audio_info.is_stereo) idx *= 2;
+				// If it is mono repeat same sample on left and right
+				// otherwise get both from the file
 				sample[0] = audio_info.samples[idx];
 				sample[1] = (audio_info.is_stereo)?audio_info.samples[idx+1]:sample[0];
 				//sample[0] = ((i&3)==0)?0x7fff:((i&3)==2)?0x8000:0;
@@ -273,9 +264,6 @@ void play_audio ( void ){
 				//sample[0] = (0x1000 * (i&0xf));
 				//sample[1] = 0x8000;
 				// Do the interpolation here:
-				//for (j = 0 ; j < audio_info.inter ; j++) {
-				//	int32_t curr_sample;
-				//}
 
 				// Doing one side at the time
 				for (j = 0 ; j < 2 ; j++) {
@@ -824,4 +812,27 @@ int16_t midpoint16(int16_t a,int16_t b) {
 void print_spaces ( int num ) 
 {
     while(num--) printf(" ");
+}
+
+// This function is good to set one GPIO port to mirror
+// the PWM to be observed by a LA
+void mirror_pwm() {
+	// Set up to mirror one of the PWM in GPIO:
+	uint32_t gpio_num;
+	uint32_t gpio_fsel_reg;
+	uint32_t gpio_fsel_lsb;
+	uint32_t gpio_fsel_regval;
+
+	gpio_num = 18; // PWM in different location
+
+	gpio_fsel_reg = (gpio_num/10) + GPIO_GPFSEL0 ;
+	gpio_fsel_lsb = (gpio_num%10) * 3 ;
+
+
+	// Read modify write routine:
+	gpio_fsel_regval = gpio[gpio_fsel_reg];
+	// programming 3'b001 to the right field
+	gpio_fsel_regval &= ~(0x7 << gpio_fsel_lsb);
+	gpio_fsel_regval |= (0x2 << gpio_fsel_lsb);
+	gpio[gpio_fsel_reg] = gpio_fsel_regval;
 }
