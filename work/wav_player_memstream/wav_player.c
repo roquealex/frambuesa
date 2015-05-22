@@ -47,13 +47,6 @@
 
 #include "fir.h"
 
-/*
-#define BCM2708_PERI_BASE       0x20000000
-#define CLOCK_BASE              (BCM2708_PERI_BASE + 0x101000)
-#define PWMCLK_CNTL 40
-#define PWMCLK_DIV  41
-*/
-
 //#define AVOID_HW_WRITES
 
 /** GPIO Register set */
@@ -87,11 +80,11 @@ const int16_t *b_48k[EQ_SETTINGS_NUM-1] = {b_low_48k,b_high_48k};
 #define SAMPLE_BUFF_SIZE (1<<14)
 // 256K
 //#define SAMPLE_BUFF_SIZE (1<<16)
-//2^20/2^2:
 // 1 MB:
 //#define SAMPLE_BUFF_SIZE (1<<18)
 // 2 MB:
 //#define SAMPLE_BUFF_SIZE (1<<19)
+// Good for visual testing:
 //#define SAMPLE_BUFF_SIZE (1<<6)
 uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
 
@@ -117,10 +110,10 @@ main ()
 	printf("Ready>\n");
 
 	do {
-		printf("\n? ");
+		//printf("\n? ");
 		//c = getchar();
 		while ((c = _inbyte (DLY_1S)) == 0xFF) ;
-		printf("c = %0x\n",c);
+		//printf("c = %0x\n",c);
 		switch (c) {
 			case 'h':
 				print_help();
@@ -140,7 +133,7 @@ main ()
 
 		}
 		
-	} while (c != 'x');
+	} while (1); // disabling going back to bootloader (c != 'x');
 }
 
 
@@ -243,7 +236,6 @@ void play_audio ( void ){
 		samples_per_buffer /= audio_info.inter;
 		left_samples = audio_info.num_samples;
 
-		// This is temporary until we get the buffers for FIR
 		while (left_samples>0) {
 			int size_of_loop = (samples_per_buffer > left_samples) ? left_samples : samples_per_buffer ;
 			int initial_idx = audio_info.num_samples-left_samples ;
@@ -257,28 +249,36 @@ void play_audio ( void ){
 				// otherwise get both from the file
 				sample[0] = audio_info.samples[idx];
 				sample[1] = (audio_info.is_stereo)?audio_info.samples[idx+1]:sample[0];
-				//sample[0] = ((i&3)==0)?0x7fff:((i&3)==2)?0x8000:0;
-				//sample[1] = (i&1)?0x7fff:0x8000;
-				//sample[0] = 0x7fff;
-				//sample[1] = 0x8000;
-				//sample[0] = (0x1000 * (i&0xf));
-				//sample[1] = 0x8000;
-				// Do the interpolation here:
+				// Override with triangular waves good for visual testing:
+				// sample[0] = ((i&3)==0)?0x7fff:((i&3)==2)?0x8000:0;
+				// sample[1] = (i&1)?0x7fff:0x8000;
 
-				// Doing one side at the time
+				// j select left or right sample
 				for (j = 0 ; j < 2 ; j++) {
 					int k;
 					int16_t mid_sample;
 					// for 2 and 4 interpolation we need the meed sample
+					//                                           
+					//         *sample[t]                        
+					//        /   ^                              
+					//       x   mid                             
+					//      /     v                              
+					//     x mid_sample=(sample[t-1]+sample[t])/2
+					//    /       ^                              
+					//   x       mid                             
+					//  /         v                              
+					// *sample[t-1]                              
+					//                                           
 					if (audio_info.inter > 1) mid_sample = midpoint16(last_sample[j],sample[j]);
 					for (k = 0 ; k <audio_info.inter  ; k++) {
 						int l;
 						int16_t curr_sample;
 						int32_t curr_sample32;
-						curr_sample = sample[j];
 						// For faster speed get a pointer to data and a copy to index
 						int16_t *xptr;
 						int xidxptr;
+
+						curr_sample = sample[j];
 						
 						if ( k == (audio_info.inter-1) ){
 							curr_sample = sample[j];
@@ -290,9 +290,6 @@ void play_audio ( void ){
 						} else { //if (k==2) 
 							curr_sample = midpoint16(mid_sample,sample[j]);
 						}
-						/*
-						*/
-
 
 						if ( user_eq_en && audio_info.eq_en ) {
 							// From this point we don't want to do complex 
@@ -300,33 +297,40 @@ void play_audio ( void ){
 							// direct pointer to x[] and a copy of ptr
 							xptr = x[j];
 							xidxptr = xidx[j];
-							//x[j][xidx[j]] = curr_sample;
 							xptr[xidxptr] = curr_sample;
-
 							curr_sample32 = 0;
-							//printf("value of idx at the beginning: %d\n", xidx[j]);
+							// The x buffer acts as a circular buffer for
+							// each loop xidxptr will iterate on all
+							// elements starting at the position of xidx[j]
+							// it will rollover at the top and continue at
+							// the bottom. At the end of the loop xidx[j]
+							// will be decremented so the next loop will
+							// use this sample as the previous
+                                                        //     Sample N               Sample N + 1
+							//               x[j]                    x[j] 
+							//  Rollover ^  +----+               ^  +----+
+							//           | 7|    |               | 7|    |
+							//           | 6|    |               | 6|    |
+							//           | 5|    |               | 5|    |
+							// xidxptr++ | 4|    |     xidxptr++ | 4|    |
+							//           | 3|    |               | 3|    |
+							//           | 2|    |               | 2|    |
+							// xidx[j]=> * 1|    |      v        | 1|    |
+							//           ^ 0|    |  xidx[j]-- => * 0|    |
+							//           |  +----+               ^  +----+
 							for(l = 0 ; l < FIR_ORDER ; l++) {
-								//curr_sample32 += ((int32_t)b_high_pass_44k1[l] *
-								/*
-								curr_sample32 += ((int32_t)b_low_pass_44k1[l] *
-										x[j][xidx[j]]);
-								xidx[j]++;
-								xidx[j]&=(FIR_ORDER-1);
-								*/
-								// Reoimplementing with copies:
 								curr_sample32 += ((int32_t)b_fir[l] *
 										xptr[xidxptr++]);
-								//xidxptr++;
 								xidxptr&=(FIR_ORDER-1);
 							}
-							//printf("value of idx at the end: %d\n", xidx[j]);
-							// In theory we should return the value of xidxptr
-							// to xidx[j] but in practice at the end of the loop
-							// xidxptr is the same as the original xidx[j] because
-							// it is a circular index on 64 elements.
 							xidx[j]--;
 							xidx[j]&=(FIR_ORDER-1);
 
+							// TODO : when using these triangulars some
+							// samples are lost with the high pass, this
+							// might be due to overflow in the range
+							// check if this is the case, find out how
+							// to saturate
 							curr_sample32 >>= 15;
 						} else {
 							// Sign extend the sample to 32 bits:
@@ -334,55 +338,50 @@ void play_audio ( void ){
 						}
 
 						// Moving the sample to all positive range
+						// An offset and a scale is applied
+						//
+						//+N+    *             
+						//  +   * *              Scale +M+    *          
+						//  +                            +   * *         
+						//  +  *   *                     +  *   *        
+						//  +                            +               
+						// 0+ *-----*-----*-  ==>  Offset+ *     *     * 
+						//  +                         ^  +               
+						//  +        *   *            |  +        *   *  
+						//  +                         |  +         * *   
+						//  +         * *             | 0+----------*----
+						//-N+          *           
+						//
 						curr_sample32 += 0x8000;
 						curr_sample32 >>= 6;
-						//sample_buffer[buffer_num][(i*2)+j] = (uint32_t) curr_sample ;
-						//sample_buffer[buffer_num][((i*2+k)*audio_info.inter)+j] = (uint32_t) curr_sample ;
 						sample_buffer[buffer_num][((i*audio_info.inter+k)*2)+j] = curr_sample32 ;
 					}
 					last_sample[j] = sample[j];
 				}
-				/*
-				last_sample[0] = sample[0];
-				last_sample[1] = sample[1];
-				// Removing the symbol by adding offset
-				sample[0] ^= 0x8000;
-				sample[1] ^= 0x8000;
-				// Reducing the bit size to match the range of the PWM
-				sample[0]>>=6;
-				sample[1]>>=6;
-				sample_buffer[buffer_num][i*2] = (uint32_t) sample[0];
-				sample_buffer[buffer_num][(i*2)+1] = (uint32_t) sample[1];
-				*/
-				//i++;
-				//sample_buffer[buffer_num][i] = (uint32_t) sample;
 			}
 			left_samples -= size_of_loop;
+			// TODO : Most of this config never changes and can
+			// be setup once outside of this loop. This is risky
+			// due to the bad BCM documentation so leaving it
+			// for later
+			//
 			// Now play the buffer
-			//cb_ptr[0].ti = DMA_S_INC | DMA_D_INC ;
-			cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC | DMA_TI_D_DREQ | (5<<16);
-			//DMA_NO_WIDE_BURSTS | DMA_WAIT_RESP | DMA_D_DREQ | DMA_PER_MAP(5);
-			//cb_ptr[0].ti = DMA_WAIT_RESP | DMA_S_INC | (5<<16);
+			cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC
+				| DMA_TI_D_DREQ | (5<<16);
 			cb_ptr[buffer_num].source_ad = (uint32_t) &sample_buffer[buffer_num][0] ;
 			cb_ptr[buffer_num].dest_ad = (((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000;
-			// This is for the old mono/stereo scheme
-			//cb_ptr[buffer_num].txfr_len = size_of_loop*4*2; // size of the transffer is in bytes so x4
 			// Size of loops is in number of samples, mutiplying it for two for left and right
 			// and 4 because on the DMA buffer uses 32 bit samples (This is what PWM receives)
-			cb_ptr[buffer_num].txfr_len = size_of_loop*4*2*audio_info.inter; // size of the transffer is in bytes so x4
+			cb_ptr[buffer_num].txfr_len = size_of_loop*4*2*audio_info.inter;
 			cb_ptr[buffer_num].stride = 0;
 			cb_ptr[buffer_num].nextconbk = 0;
+			// Unecessary print but helps for debug
 			printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
-			/*
-			// This code will be substituted by dma:
-			dma[buffer_num][DMA_CS] = DMA_CS_RESET;
-#ifndef AVOID_HW_WRITES
-			RPI_WaitMicroSeconds(1000);
-			printf("Reset done\n");
-#endif
-			*/
 
 			dma[buffer_num][DMA_DEBUG] = DMA_DEBUG_READ_ERROR | DMA_DEBUG_FIFO_ERROR | DMA_DEBUG_READ_LAST_NOT_SET_ERROR; 
+			// This line was here because the BCM doc suggested using
+			// the mirror starting with 0xC but that didn't work for
+			// all the addresses
 			//dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)cb_ptr | 0xC0000000;
 			dma[buffer_num][DMA_CONBLK_AD] = (uint32_t)&cb_ptr[buffer_num] ;
 			// Starting the DMA engine:
@@ -408,17 +407,12 @@ void play_audio ( void ){
 				// would need to apply an or mask but in reality we want
 				// to write everything in zero for this particular case
 				dma[buffer_num^1][DMA_CS] = DMA_CS_END;
-				//delta_time = RPI_GetTimeStamp();
-				//printf("time %u - %u\n",delta_time,ts0);
-				//if (ts0 > delta_time) printf("ROLLOVER\n");
-				//delta_time -= ts0;
 				delta_time = RPI_GetTimeStamp() - ts0;
 				//printf("Delta time %d\n",delta_time);
 				if (min_delta_time > delta_time) min_delta_time = delta_time;
 			}
 			// Play the next buffer
 			dma[buffer_num][DMA_CS] = DMA_CS_ACTIVE;
-			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
 
 #ifdef AVOID_HW_WRITES
 			// This code simulates the DMA transfer on emulator
@@ -455,28 +449,6 @@ void play_audio ( void ){
 				dma[buffer_num][DMA_CS] = DMA_CS_END;
 			}
 #endif
-
-			//for (i = 0 ; i < 9 ; i++) {
-			//RPI_WaitMicroSeconds(1000000);
-			//printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
-			//}
-			
-			// Dont wait for it to finish anymore
-			//while(!(dma[buffer_num][DMA_CS] & DMA_CS_END));
-
-			//>printf("Finished DMA\n");
-			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
-
-			// Technically we need to write only the END bit so we
-			// would need to apply an or mask but in reality we want
-			// to write everything in zero for this particular case
-			//dma[buffer_num][DMA_CS] = DMA_CS_END;
-			
-			//>printf("After clearing flag\n");
-			//>printf("DMA_CS = %08x\n", dma[buffer_num][DMA_CS]);
-			//while(1);
-
-			//printf("Src %x and dest %x from registers\n",dma[buffer_num][DMA_SOURCE_AD],dma[buffer_num][DMA_DEST_AD]);
 			// Toggle buffer number 0->1 or 1->0
 			if (left_samples>0) buffer_num ^= 1;
 
@@ -494,6 +466,9 @@ void play_audio ( void ){
 		// given since when filtering is used the last value
 		// in the pwm might be different from these
 		//printf("Last samples %d %d\n", last_sample[1], last_sample[0]);
+		// TODO : Move this inside the main loop
+		// and get rid of the click at the start of
+		// the playback
 		for (i = 0; i < 2 ; i++) {
 			last_sample[i] >>= 6;
 			last_sample[i] += 0x0200;
@@ -516,7 +491,6 @@ void play_audio ( void ){
 		}
 
 		// Stop PWM:
-		printf("At the end Left samples %d\n", left_samples);
 		pwm[PWM_CTL] = 0;
 		free(mem);
 		printf("Done Playing\n");
@@ -524,6 +498,8 @@ void play_audio ( void ){
 	} // if (num_samples > 0 ) 
 }
 void stop_audio ( void ){
+	// Not implemented yet because the code
+	// does not play the audio in the background
 	printf("Stopping\n");
 }
 
@@ -548,14 +524,7 @@ void load_audio (){
 	FILE *stream;
 
 	char *wav_data;
-	size_t wav_data_size;
 	int file_size;
-
-	int fullrows;
-	int lastrow;
-	int columns = 8;
-	int j;
-	int idx;
 
 	if (audio_info.is_valid) {
 		printf ("Previously loaded audio, releasing memory at address %x first...\n",(int)audio_info.wav_data);
@@ -565,7 +534,6 @@ void load_audio (){
 	audio_info.is_valid = 0;
 
 	wav_data = 0;
-	//file_size = xmodemReceive((char *) address, FILE_MAX_SIZE);   
 	file_size = xmodemReceive(&wav_data, FILE_MAX_SIZE);   
 	audio_info.wav_data = wav_data;
 	if (file_size < 0 || file_size > FILE_MAX_SIZE) {
@@ -573,11 +541,7 @@ void load_audio (){
 		free(wav_data);
 		return;
 	}
-	printf ("\nFile loaded\n");
-
-	//printf("Address given to wav_data %x\n",wav_data);
-	//wav_data = (char *) address;
-
+	printf ("\nWAV File loaded!\n");
 
 	if ( (((int)wav_data) & 0x03) != 0 ) {
 		printf("FATAL_ERROR: Load address is not aligned to 32 bits\n");
@@ -598,14 +562,14 @@ void load_audio (){
 		return ;
 	}
 	fmt_ptr = (struct fmt *)&wav_data[12];
-	printf("Wav info:\n");
-	printf("Audio Format: %x\n",fmt_ptr->AudioFormat);
-	printf("Number of channels: %d\n",fmt_ptr->NumChannels);
-	printf("Sample Rate: %d Khz\n",fmt_ptr->SampleRate);
+	printf("# Wav info:\n");
+	printf("Audio Format       : %x\n",fmt_ptr->AudioFormat);
+	printf("Number of channels : %d\n",fmt_ptr->NumChannels);
+	printf("Sample Rate        : %d Khz\n",fmt_ptr->SampleRate);
 	//8000, 44100, etc.
-	printf("Sample Rate: %d bps\n",fmt_ptr->ByteRate);
-	printf("Block Align: %d\n",fmt_ptr->BlockAlign);
-	printf("Bits per sample: %d bits\n",fmt_ptr->BitsPerSample);
+	printf("Byte Rate          : %d bps\n",fmt_ptr->ByteRate);
+	printf("Block Align        : %d\n",fmt_ptr->BlockAlign);
+	printf("Bits per sample    : %d bits\n",fmt_ptr->BitsPerSample);
 
 	// 20 is the offset of AudioFormat
 	data_ptr = (struct data *)&wav_data[20 + fmt_ptr->Subchunk1Size];
@@ -615,10 +579,8 @@ void load_audio (){
 		free(wav_data);
 		return ;
 	}
-	printf("Data info:\n");
-	//printf("Audio Format: %x\n",data_ptr->Subchunk2ID);
-	printf("Size: %d bytes\n",data_ptr->Subchunk2Size);
-	//num_samples = data_ptr->Subchunk2Size / (fmt_ptr->NumChannels * ( fmt_ptr->BitsPerSample/8) );
+	printf("# Data info:\n");
+	printf("Size               : %d bytes\n",data_ptr->Subchunk2Size);
 	num_samples = data_ptr->Subchunk2Size;// / (fmt_ptr->NumChannels * ( fmt_ptr->BitsPerSample/8) );
 
 	// To unify the case of stereo and mono plus different interpolations it is better
@@ -664,15 +626,16 @@ void load_audio (){
 			break;
 	}
 	audio_info.num_samples = num_samples;
-	printf("Number of samples: %d\n",audio_info.num_samples);
 	wav_start = (void *)&wav_data[0];
 	offset = 20 + fmt_ptr->Subchunk1Size + 8;
 	//sample_start = (void *)&wav_data[20 + fmt_ptr->Subchunk1Size + 8];
 	sample_start = (void *)&wav_data[offset];
-	printf("Sample start: %x\n",(unsigned int)sample_start);
-	printf("Wav start: %x\n",(unsigned int)wav_start);
-	printf("Offset calculation: %d\n",((unsigned int)sample_start - (unsigned int)wav_start));
-	printf("Offset: %d\n",offset);
+	printf("# Calculated info:\n");
+	printf("Number of samples  : %d\n",audio_info.num_samples);
+	printf("Sample start       : %x\n",(unsigned int)sample_start);
+	printf("Wav start          : %x\n",(unsigned int)wav_start);
+	printf("Offset calculation : %d\n",((unsigned int)sample_start - (unsigned int)wav_start));
+	printf("Offset             : %d\n",offset);
 		
 	// Setting up the clock for pwm:
 
@@ -694,9 +657,6 @@ void load_audio (){
 		free(wav_data);
 		while(1);
 	}
-	// Fastest interpolation
-	//sampling_rate = 12000;
-	//sampling_rate = 48000;
 	switch (sampling_rate) {
 		case 44100:
 		case 48000:
@@ -732,12 +692,12 @@ void load_audio (){
         //int idiv = (pwm_clk_freq/0x3FF)/sampling_rate;
         //int idiv = (pwm_clk_freq/(1<<10))/sampling_rate;
         int idiv = (pwm_clk_freq>>bits_per_sample)/audio_info.fs;
-        printf ("PWM Clk freq %d Hz\n",pwm_clk_freq);
-        printf ("Bits per sample %d\n",bits_per_sample);
-        printf ("Sampling rate %d Hz\n",sampling_rate);
-        printf ("Fs rate %d Hz\n",audio_info.fs);
-        printf ("Interpolation %d\n",audio_info.inter);
-        printf ("Int div %d\n",idiv);
+        printf("PWM Clk freq       : %d Hz\n",pwm_clk_freq);
+        printf("Bits per sample    : %d\n",bits_per_sample);
+        printf("Sampling rate      : %d Hz\n",sampling_rate);
+        printf("Fs rate            : %d Hz\n",audio_info.fs);
+        printf("Interpolation      : %d\n",audio_info.inter);
+        printf("Int div            : %d\n",idiv);
 
         if (idiv < 1 || idiv > 0x1000) {
                 printf("FATAL_ERROR: idiv out of range: %x\n", idiv);
@@ -757,7 +717,6 @@ void load_audio (){
 
         // disable PWM
         pwm[PWM_CTL] = 0;
-        //*(pwm + PWM_CTL) = 0;
 
         RPI_WaitMicroSeconds( 100 );
 
@@ -768,40 +727,38 @@ void load_audio (){
 	pwm[PWM_RNG2] = range;
 #endif
 
-	printf ("Range %d \n",range);
+	//printf ("Range %d \n",range);
 
 	audio_info.samples = (uint16_t *) sample_start;
 	audio_info.is_valid = 1;
 
 }
 
-void print_help ( void ) 
+void print_help ( void ) {
+	printf("Commands:\n");
+	printf("l");                     
+	print_spaces(29);
+	printf(": Load file wav\n");
 
-{
-    printf("Commands:\n");
-    printf("l");                     
-    print_spaces(29);
-    printf(": Load file wav\n");
+	printf("p");                     
+	print_spaces(29);
+	printf(": play/pause wav\n");
 
-    printf("p");                     
-    print_spaces(29);
-    printf(": play/pause wav\n");
+	printf("s");                     
+	print_spaces(29);
+	printf(": stop wav\n");
 
-    printf("s");                     
-    print_spaces(29);
-    printf(": stop wav\n");
+	printf("x");                     
+	print_spaces(29);
+	printf(": exit (boot loader)\n");
 
-    printf("x");                     
-    print_spaces(29);
-    printf(": exit (boot loader)\n");
+	printf("e");                     
+	print_spaces(29);
+	printf(": Change EQ Setting (Currently %s)\n",eq_setting_str[audio_info.eq_setting]);
 
-    printf("e");                     
-    print_spaces(29);
-    printf(": Change EQ Setting (Currently %s)\n",eq_setting_str[audio_info.eq_setting]);
-
-    printf("h");                     
-    print_spaces(29);
-    printf(": help\n");
+	printf("h");                     
+	print_spaces(29);
+	printf(": help\n");
 
 }
 int16_t midpoint16(int16_t a,int16_t b) {
@@ -809,9 +766,8 @@ int16_t midpoint16(int16_t a,int16_t b) {
 }
 
 /* Print a number of spaces */
-void print_spaces ( int num ) 
-{
-    while(num--) printf(" ");
+void print_spaces ( int num ) {
+	while(num--) printf(" ");
 }
 
 // This function is good to set one GPIO port to mirror
