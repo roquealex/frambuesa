@@ -74,7 +74,8 @@ AMBER_CROSSTOOL ?= arm-none-eabi
  MEM    = $(addsuffix .mem, $(basename $(TGT)))
  DIS    = $(addsuffix .dis, $(basename $(TGT)))
  FLT    = $(addsuffix .flt, $(basename $(TGT)))
- IMG    = $(addsuffix .img, $(basename $(TGT)))
+# IMG    = $(addsuffix .img, $(basename $(TGT)))
+ IMG    = kernel.img
  
 ifdef USE_MINI_LIBC
  OBJ = $(addsuffix .o,   $(basename $(SRC))) $(LIBC_OBJ)
