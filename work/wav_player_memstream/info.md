@@ -22,45 +22,56 @@ The PWM is a digital signal and can go only from 0 to VCC. Typically it produces
 Let’s take as example a sequence of numbers [0 2 5 6 7 6 5 2 0 -3 -6 -7 -8 -7 -6 -3] on a 4 bit resolution number. The sequence looks graphically like this:
 
 
-![Sine Wave](http://www.songsofthecosmos.com/images/sine_wave.gif)
+![Sine Wave](drawings/sine.jpg)
  
 Which is very close to a sine wave. If we input the same sequence to the PWM it will look like this:
 
-![PWM Sine Wave](http://www.songsofthecosmos.com/images/sine_wave.gif)
+![PWM Sine Wave](drawings/pwm.jpg)
 
 The final wave doesn’t look like a sine wave but it actually sounds like it. The human ear is susceptible to frequencies and the square wave produced by the PWM still has the frequency information represented by those numbers. If we could get a frequency graph of the previous example it will look like this:
  
+![Freq PWM](drawings/freqpwm.jpg)
+
 There will be a frequency component on the original frequency that those numbers sine wave represents and there will be a huge component on the PWM frequency (how often the PWM gives a new sample). Still looks noisy though.
-Two other factors that help us is that there is an analog filter at the output of the PWM which will attenuate high frequencies and he fact that the human can only listen frequency ranges between 20 Hz and 20 KHz.
+
+Two other factors that help us is that there is an analog filter at the output of the PWM which will attenuate high frequencies and the fact that the human can only listen frequency ranges between 20 Hz and 20 KHz.
  
+![Freq filt](drawings/freqfilt.jpg)
+
 The higher the PWM frequency the better quality sound at the output. On the other hand if the PWM frequency is inside the human range then it will be perceptible in the audio. This code only uses 32 KHz, 44.1 KHz and 48 KHz PWM frequencies which are decently above the human range.
 
 
 ## Dual audio buffering
 
-In general the way this works is by using two identical buffers in memory and 2 dma channels. One buffer s being streamed to the PWM while the other one is being filled with processed data. The basic operations done on the data are arrangement of samples, interpolation, filtering, formatting data for PWM and setting up of the DMA transfer.
+In general the way this works is by using two identical buffers in memory and 2 dma channels. One buffer is being streamed to the PWM while the other one is being filled with processed data. The basic operations done on the data are arrangement of samples, interpolation, filtering, formatting data for PWM and setting up of the DMA transfer.
 In the code this dual buffer is declared as a bidimensional array:
 
 ```c
 uint32_t sample_buffer[2][SAMPLE_BUFF_SIZE];
 ```
 The main loop keeps track of the current buffer using buffer_num which toggles on each data processing loop. There will be a few variables, arrays and pointers declared as bidimensional arrays too and those will be accessed only when the given buffer number is selected.
+
 The idea is to process and arrange the data while some audio is already being played in the background. By the time the current DMA stream to the PWM finishes the next buffer and DMA channels are ready to start streaming. Thanks to the fact that the PWM also has a FIFO this is heard as a non-interrupted audio stream. The following diagram tries to show overtime how the processing is divided between buffers. Dark regions use the processor and light regions is the DMA streaming to the PWM, arrows try to show how the program flow would jump from one buffer to the other one.
 
-![Dual Buffer](http://www.songsofthecosmos.com/images/sine_wave.gif)
+![Dual Buffer](drawings/dual_buff.jpg)
  
 Note that there is idle time after the DMA setup. That’s the time between finishing the data processing and the other DMA finishing streaming. If the idle time is negative then the audio stream will be interrupted this will translate in really noisy and inaccurate stream. Some of the processing in the loop is proportional to the number of samples (like FIR filtering) and some is a constant (like DMA setup). To reduce the effect of the constant processing time the size of buffer can be increased.
 
 ## Interpolation
 
-In order to improve audio quality the code converts all the audio streams that use a lower standard frequencies to either 32 KHz, 44.1 KHz or 48 KHz by doing linear interpolation of the current sample and the previous sample.
-So for instance a 16KHz audio stream will be raised to 32Khz. So now for one sample of the original file we need 2. The sample that we currently lack will be calculated as the midpoint between the 2 samples.
+In order to improve audio quality the code converts all the audio streams that use a lower standard frequencies to either 32 KHz, 44.1 KHz or 48 KHz by doing linear interpolation of the current sample and the previous sample. So for instance a 16KHz audio stream will be raised to 32Khz. So now for one sample of the original file we need 2. The sample that we currently lack will be calculated as the midpoint between the 2 samples.
+
 The following diagram shows the relationship between a sample that comes from the file and a sample to be filtered/streamed in case of the base frequencies 32 KHz, 44.1 KHz or 48 KHz. In this case there is a 1:1 relationship of sample from file and sample streamed to the pwm.
 
+![No interpolation](drawings/nointer.jpg)
  
-The next one shows what happens with 22050 Hz and 16000 Hz which ae promoted to 44.1 KHz and 32 KHz by calculating an intermediate sample being the middle point of the 2. There is a 2:1 relationship between the samples streamed and the samples in the file.
+The next one shows what happens with 22050 Hz and 16000 Hz which are promoted to 44.1 KHz and 32 KHz by calculating an intermediate sample being the middle point of the 2. There is a 2:1 relationship between the samples streamed and the samples in the file.
+
+![2 interpolation](drawings/inter2.jpg)
  
 Similarly for 11025 Hz and 8000 Hz promoted to 44.1 KHz and 32 KHz respectively. In this case there is a 4:1 relationship and the 2 extra samples are calculated recursively as the midpoint between the previous and middle sample and the middle sample and the current sample:
+
+![4 interpolation](drawings/inter4.jpg)
  
 The quality of the audio gets improved with this because the output wave is smoother and the frequency of the PWM is taken out of the audible range (8 KHz and 11025 Hz are inside the range). Another advantage of interpolation is we need less sets of coefficients for the filters, since they are dependent on sampling rate.
 
@@ -74,6 +85,7 @@ sample_buffer[buffer_num][((i*audio_info.inter+k)*2)+j] = curr_sample32 ;
 
 Graphically this is how it looks:
 
+![Buffer arrangement](drawings/buffer.jpg)
  
 ## Equalization
 The code supports FIR filtering using some presets. It is based on a 32 coefficient FIR filter, the samples and coefficients are interpreted as a 16 bit fixed point numbers. There is one filter per base frequency (32 KHz, 44.1 KHz and 48 KHz) so in the fir.h file 3 sets of coefficients will be found per filter.
@@ -95,6 +107,33 @@ Once loaded hit on p to play. You can change the equalizer setting by hitting e 
 This program tries to touch on many peripherals of the raspberry pi. The documentation for the peripherals can be found here:
 https://www.raspberrypi.org/documentation/hardware/raspberrypi/bcm2835/BCM2835-ARM-Peripherals.pdf
 The document is full of typos and sometimes is inaccurate so I based a lot of the configuration on other peoples work. The code tries to use defines as much as possible every time a peripheral control register is programmed. Most of the configuration can be understood by looking at the dma, pwm, gpio and system timer chapters. The only obscure configuration is setting up the clock for the PWM and something can be found in “6.3 General Purpose GPIO Clocks”.
+
+## List of files
+
+File             | Description
+---------------- | ----------------
+xmodem.c         | Has the function to do an xmodem file transfer over the UART. Mainly a third party code with minimum modifications to support memstreams.
+wav_player.h     | Prototypes for the main code.
+wav_player.c     | Main program which has a basic text based interface and audio playback functionality.
+start.S          | Entry point of the bare metal program. Eventually calls C.
+sin_44k_stereo.h | File transfer to playback in debug mode, 440 + 880 Hz sin waves at 44.1 KHz stereo.
+sin_44k_mono.h   | File transfer to playback in debug mode, 440 + 880 Hz sin waves at 44.1 KHz mono.
+sin_16k_stereo.h | File transfer to playback in debug mode, 440 + 880 Hz sin waves at 16 KHz stereo.
+sin_16k_mono.h   | File transfer to playback in debug mode, 440 + 880 Hz sin waves at 16 KHz mono.
+rpi-systimer.h   | System timer prototypes and constants mainly taken from valvers tutorial.
+rpi-systimer.c   | System timer functions mainly taken from valvers tutorial.
+rpi-pwm.h        | PWM defines.
+rpi-gpio.h       | GPIO defines.
+rpi-dma.h        | DMA defines and control block data type.
+rpi-base.h       | Base definitions needed by system timer files mainly taken from valvers tutorial.
+Octave           | Octave code that takes the coefficients from the web page and converts them.
+Makefile         | Makefile to compile the project based on the one from ambers boot loader.
+fir.h            | Coefficients for the FIRs at 
+drawings         | Support images for the documentation.
+cstubs.c         | Basic stub functions for the libc.
+cstartup.c       | C initialization code. BSS gets initialized to zero. 
+crc16.h          | CRC function prototypes.
+crc16.c          | CRC implementation. Third party software.
 
 
 ## Future improvements:
