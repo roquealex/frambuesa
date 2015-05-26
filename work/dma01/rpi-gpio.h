@@ -69,10 +69,4 @@
 #define GPIO_GPPUDCLK0  38
 #define GPIO_GPPUDCLK1  39
 
-/** The base address of the PWM CLK peripheral (ARM Physical Address) */
-#define CLOCK_BASE              0x20101000UL
-#define PWMCLK_CNTL 40
-#define PWMCLK_DIV  41
-
-
 #endif

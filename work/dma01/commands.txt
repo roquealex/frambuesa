@@ -1,0 +1,3 @@
+arm-none-eabi-gcc -O2 -march=armv2a -mno-thumb-interwork hello-world.c cstartup.c cstubs.c start.S -o hello-world.elf
+
+arm-none-eabi-objdump.exe -C -S -EL hello-world.elf  > hello-world.dis

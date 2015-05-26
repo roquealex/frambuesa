@@ -1,47 +1,40 @@
-/*----------------------------------------------------------------
-//                                                              //
-//  hello-world.c                                               //
-//                                                              //
-//  This file is part of the Amber project                      //
-//  http://www.opencores.org/project,amber                      //
-//                                                              //
-//  Description                                                 //
-//  Simple stand-alone example application.                     //
-//                                                              //
-//  Author(s):                                                  //
-//      - Conor Santifort, csantifort.amber@gmail.com           //
-//                                                              //
-//////////////////////////////////////////////////////////////////
-//                                                              //
-// Copyright (C) 2010 Authors and OPENCORES.ORG                 //
-//                                                              //
-// This source file may be used and distributed without         //
-// restriction provided that this copyright statement is not    //
-// removed from the file and that any derivative work contains  //
-// the original copyright notice and the associated disclaimer. //
-//                                                              //
-// This source file is free software; you can redistribute it   //
-// and/or modify it under the terms of the GNU Lesser General   //
-// Public License as published by the Free Software Foundation; //
-// either version 2.1 of the License, or (at your option) any   //
-// later version.                                               //
-//                                                              //
-// This source is distributed in the hope that it will be       //
-// useful, but WITHOUT ANY WARRANTY; without even the implied   //
-// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      //
-// PURPOSE.  See the GNU Lesser General Public License for more //
-// details.                                                     //
-//                                                              //
-// You should have received a copy of the GNU Lesser General    //
-// Public License along with this source; if not, download it   //
-// from http://www.opencores.org/lgpl.shtml                     //
-//                                                              //
-----------------------------------------------------------------*/
+//                                                              
+//  wav-player.c                                                
+//                                                              
+//  This file is part of wav player memstream                   
+//                                                              
+//  Description                                                 
+//  Bare metal raspberrypi wav player using PWM audio output    
+//                                                              
+//  Author(s):                                                  
+//      - Roque Arcudia, roquealex@gmail.com           
+//      - Conor Santifort, csantifort.amber@gmail.com (file transfer based on his bootloader)
+//                                                              
+//                                                              
+// Copyright (C) 2010 Authors and OPENCORES.ORG                 
+//                                                              
+// This source file may be used and distributed without         
+// restriction provided that this copyright statement is not    
+// removed from the file and that any derivative work contains  
+// the original copyright notice and the associated disclaimer. 
+//                                                              
+// This source file is free software; you can redistribute it   
+// and/or modify it under the terms of the GNU Lesser General   
+// Public License as published by the Free Software Foundation; 
+// either version 2.1 of the License, or (at your option) any   
+// later version.                                               
+//                                                              
+// This source is distributed in the hope that it will be       
+// useful, but WITHOUT ANY WARRANTY; without even the implied   
+// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      
+// PURPOSE.  See the GNU Lesser General Public License for more 
+// details.                                                     
+//                                                              
+// You should have received a copy of the GNU Lesser General    
+// Public License along with this source; if not, download it   
+// from http://www.opencores.org/lgpl.shtml                     
+//                                                              
 
-/* Note that the stdio.h referred to here is the one in
-   mini-libc. This applications compiles in mini-libc
-   so it can run stand-alone.
-*/   
 
 
 /* These uart input delay values are correct for a 33MHz system clock */
@@ -50,34 +43,21 @@
 //#define FILE_MAX_SIZE   0x00800000 /* 8MB max Xmodem transfer file size        */
 #define FILE_MAX_SIZE   0x01000000 /* 16MB max Xmodem transfer file size        */
 
+#include <stdint.h>
 
 void print_spaces ( int num );
 void print_help ( void );
 void play_audio ( void );
 void stop_audio ( void );
-void load_audio ( unsigned int );
+void load_audio ( void );
+void eq_setting ( void );
 
+int16_t midpoint16(int16_t, int16_t);
 
-/*
-localparam AMBER_AUDIO_SEQ_START_ADDRESS =  16'h0000;
-localparam AMBER_AUDIO_SEQ_SAMPLE_COUNT  =  16'h0004;
-localparam AMBER_AUDIO_SEQ_CMD           =  16'h0008;
-localparam AMBER_AUDIO_SEQ_STATUS        =  16'h000c;
-localparam AMBER_AUDIO_SEQ_CHL_CONFIG    =  16'h0010;
-localparam AMBER_AUDIO_SEQ_SAMPLE_RATE   =  16'h0014;
-*/
-#define AMBER_AUDIO_SEQ_START_ADDRESS_OFF  0
-#define AMBER_AUDIO_SEQ_SAMPLE_COUNT_OFF   1
-#define AMBER_AUDIO_SEQ_CMD_OFF            2
-#define AMBER_AUDIO_SEQ_STATUS_OFF         3
-#define AMBER_AUDIO_SEQ_CHL_CONFIG_OFF     4
-#define AMBER_AUDIO_SEQ_SAMPLE_RATE_OFF    5
-#define AMBER_AUDIO_SEQ_BASE 0x20000000
 
 /* Our structure */
 struct riff_header
 {
-	//int x,y,z;
 	unsigned long ChunkID;
 	//Contains the letters "RIFF" in ASCII form
 	//(0x52494646 big-endian form).
@@ -135,4 +115,35 @@ struct data
 	//number.
 
 };
+
+// This structure will save the current wav information required for playback
+typedef struct {
+	// Number of samples per channel
+	unsigned int num_samples;
+
+	// Sample frequency for PWM 32k, 44.1k and 48k only
+	// the original wav sample freq is fs / 2^inter
+	uint32_t fs;
+
+	// Interpolation ration.
+	uint32_t inter;
+
+	// Pointer to the file in memory
+	char *wav_data;
+
+	// Direct pointer to the samples in memory,
+	// only 16 bit samples supported
+	int16_t *samples;
+
+	// 1 if 2 channel , else 0
+	uint32_t is_stereo;
+	// Equalizer is enabled
+	uint32_t is_valid;
+	// Equalizer is enabled (if supported by fs)
+	uint32_t eq_en;
+	// Equalizer setting, check eq_setting_str for settings
+	// Disable eq should always be the last
+	uint32_t eq_setting;
+} audio_info_t;
+
 

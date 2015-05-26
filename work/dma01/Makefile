@@ -41,8 +41,8 @@
 # Assembly source files
 
 #SRC = blinker01.c start.S
-SRC = malloc_test.c rpi-systimer.c cstartup.c cstubs.c start.S
-TGT = malloc_test.elf
+SRC = dma01.c rpi-systimer.c cstartup.c cstubs.c start.S
+TGT = dma01.elf
 #LDS = sections.lds
 
 #USE_MINI_LIBC = 1
@@ -117,9 +117,8 @@ endif
 # For emulation use this:
  #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
  #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--fix-v4bx -Wl,-Ttext-segment=10000 -g
- CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,-Ttext-segment=10000 -g -Wl,-verbose
 # Non emulation:
- #CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
+ CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx
 # Non emulation verbose:
 # CLDFLAGS = -Wl,-Bstatic -Wl,-Map,$(MAP) -Wl,--strip-debug -Wl,--fix-v4bx -Wl,-verbose
 
@@ -130,6 +129,7 @@ debug:  $(MMP) $(DIS)
 endif
 
 run:  $(IMG)
+	#qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel random.img
 	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -kernel $(IMG)
 rundebug:  $(IMG)
 	qemu-system-arm -cpu arm1176 -m 256 -M versatilepb -nographic -s -S -kernel random.img
@@ -170,7 +170,6 @@ $(IMG): $(TGT) random.img
 random.img:
 	#dd if=/dev/urandom of=random.img bs=1024 count=1024
 	dd if=/dev/urandom of=random.img bs=1048576 count=255
-
 
 clean:
 	@rm -rfv *.o *.elf *.flt *.gdb *.dis *.map *.mem *.v $(IMG) $(MMP32) $(MMP128)

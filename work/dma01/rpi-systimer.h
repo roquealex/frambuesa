@@ -21,5 +21,5 @@ typedef struct {
 
 extern rpi_sys_timer_t* RPI_GetSystemTimer(void);
 extern void RPI_WaitMicroSeconds( uint32_t us );
-uint32_t RPI_GetTimeStamp( void );
+
 #endif

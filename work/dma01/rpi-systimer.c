@@ -17,9 +17,3 @@ void RPI_WaitMicroSeconds( uint32_t us )
         /* BLANK */
     }
 }
-
-uint32_t RPI_GetTimeStamp( void )
-{
-    volatile uint32_t ts = rpiSystemTimer->counter_lo;
-    return ts;
-}
