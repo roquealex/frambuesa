@@ -104,7 +104,7 @@ main ()
 	printf ("#  #  #  #######   #   #\n");
 	printf ("#  #  #  #     #    # #\n");
 	printf (" ## ##   #     #     #\n");
-	printf ("\nWAV Player (mem stream v1.3)\n\n");
+	printf ("\nWAV Player (mem stream v1.4)\n\n");
 
 	print_help();
 	printf("Ready>\n");
@@ -229,6 +229,28 @@ void play_audio ( void ){
 		RPI_WaitMicroSeconds(1000);
 		printf("Reset DMA done\n");
 #endif
+
+		for (i = 0; i < 2 ; i++) {
+			// The CB used to be configuredd in the main loop. It
+			// was moved here for runtime improvement but it was
+			// only improved when EQ was enabled. The code used to
+			// have buffer_num as index like the example
+			// commented. Look for this line to find the place
+			// where it was before:
+			//cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC
+			//	| DMA_TI_D_DREQ | (5<<16);
+			cb_ptr[i].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC
+				| DMA_TI_D_DREQ | (5<<16);
+			cb_ptr[i].source_ad = (uint32_t) &sample_buffer[i][0] ;
+			cb_ptr[i].dest_ad = (((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000;
+			// txfr_len set on each loop but this could be moved here
+			// by programming the most common buffer size and only changing
+			// it if it is different from this one which only happen in the
+			// last loop.
+			//cb_ptr[i].txfr_len = size_of_loop*4*2*audio_info.inter;
+			cb_ptr[i].stride = 0;
+			cb_ptr[i].nextconbk = 0;
+		}
 		// To start with the number of samples that a buffer can fit is
 		// half of the size since the buffer interleaves a left and a
 		// right sample.
@@ -360,23 +382,26 @@ void play_audio ( void ){
 				}
 			}
 			left_samples -= size_of_loop;
-			// TODO : Most of this config never changes and can
-			// be setup once outside of this loop. This is risky
-			// due to the bad BCM documentation so leaving it
-			// for later
-			//
-			// Now play the buffer
-			cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC
-				| DMA_TI_D_DREQ | (5<<16);
-			cb_ptr[buffer_num].source_ad = (uint32_t) &sample_buffer[buffer_num][0] ;
-			cb_ptr[buffer_num].dest_ad = (((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000;
+
+			// Now play the buffer:
+
+			// The original code used to configure the CB here but
+			// it was writing the same informationn to it over and
+			// over. so that configuration was moved out of the
+			// loop. Interestingly it only improved the runtime of
+			// the code when the FIR was used but it worsen the
+			// runtime when it was disabled. Investigate...
+			//cb_ptr[buffer_num].ti = DMA_TI_NO_WIDE_BURSTS | DMA_TI_WAIT_RESP | DMA_TI_S_INC
+			//	| DMA_TI_D_DREQ | (5<<16);
+			// ...
+
 			// Size of loops is in number of samples, mutiplying it for two for left and right
 			// and 4 because on the DMA buffer uses 32 bit samples (This is what PWM receives)
 			cb_ptr[buffer_num].txfr_len = size_of_loop*4*2*audio_info.inter;
-			cb_ptr[buffer_num].stride = 0;
-			cb_ptr[buffer_num].nextconbk = 0;
 			// Unecessary print but helps for debug
-			printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
+			// TODO : Removing this print message increases
+			// processing time when using EQ:
+			//>printf("Copying %d bytes from %x to %x\n",cb_ptr[buffer_num].txfr_len,cb_ptr[buffer_num].source_ad,cb_ptr[buffer_num].dest_ad);
 
 			dma[buffer_num][DMA_DEBUG] = DMA_DEBUG_READ_ERROR | DMA_DEBUG_FIFO_ERROR | DMA_DEBUG_READ_LAST_NOT_SET_ERROR; 
 			// This line was here because the BCM doc suggested using
@@ -423,13 +448,17 @@ void play_audio ( void ){
 				(pwm[PWM_DMAC] & PWM_DMAC_ENAB)
 			) {
 				dma_cb_t *cb_ptr_test;
+				uint32_t* source_ad_test;
+				uint32_t dest_ad_test;
 				// Recover the pointer from DMA descriptor
 				cb_ptr_test = (dma_cb_t*)dma[buffer_num][DMA_CONBLK_AD];
+				source_ad_test = ((uint32_t*)cb_ptr_test->source_ad);
+				dest_ad_test = cb_ptr_test->dest_ad;
 				for (i = 0 ; i < cb_ptr_test->txfr_len/4 ; i ++) {
 					const int graph_width = 33;
 					char graph[graph_width];
 					int j;
-					uint32_t sample = ((uint32_t*)cb_ptr_test->source_ad)[i];
+					uint32_t sample = *source_ad_test;
 					sample>>=5;
 					for ( j = 0 ; j < (graph_width-1) ; j++) {
 						if (j == sample) {
@@ -441,12 +470,23 @@ void play_audio ( void ){
 					graph[(graph_width-1)] = 0;
 					//printf("%d\n", sample);
 					//printf("%d\n", graph_width);
-					if((i%2)==0) printf("%s|", graph);
-					else printf("%s|\n", graph);
+					// Test the dest_ad:
+					if (dest_ad_test == ((((uint32_t) &pwm[PWM_FIF1])&0x00FFFFFF) | 0x7E000000)) {
+						if((i%2)==0) printf("%s|", graph);
+						else printf("%s|\n", graph);
+					}
+					// Test the TI/stride:
+					if ((cb_ptr_test->ti & DMA_TI_S_INC) && (cb_ptr_test->stride == 0)) {
+						source_ad_test++;
+					}
+					if (cb_ptr_test->ti & DMA_TI_D_INC) {
+						dest_ad_test++;
+					}
 					
 				}
 				// Set the DMA done flag
-				dma[buffer_num][DMA_CS] = DMA_CS_END;
+				if (cb_ptr_test->nextconbk == 0)
+					dma[buffer_num][DMA_CS] = DMA_CS_END;
 			}
 #endif
 			// Toggle buffer number 0->1 or 1->0
